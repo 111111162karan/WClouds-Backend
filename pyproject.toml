@@ -1,0 +1,26 @@
+[project]
+name = "wclouds"
+version = "0.1.0"
+requires-python = ">=3.14"
+dependencies = [
+    "annotated-doc==0.0.4",
+    "annotated-types==0.7.0",
+    "anyio==4.13.0",
+    "click==8.3.3",
+    "colorama==0.4.6",
+    "fastapi==0.136.1",
+    "fastapi-restful==0.6.0",
+    "greenlet==3.5.0",
+    "h11==0.16.0",
+    "idna==3.13",
+    "mypy-extensions==1.1.0",
+    "psutil==5.9.8",
+    "pydantic==2.13.3",
+    "pydantic-core==2.46.3",
+    "sqlalchemy==2.0.49",
+    "starlette==1.0.0",
+    "typing-extensions==4.15.0",
+    "typing-inspect==0.9.0",
+    "typing-inspection==0.4.2",
+    "uvicorn==0.46.0",
+]

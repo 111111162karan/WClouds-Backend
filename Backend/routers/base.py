@@ -1,0 +1,17 @@
+from fastapi import HTTPException
+from sqlalchemy.orm import Session
+from database import Base
+from auth import verify_api_key
+
+
+class BaseAPI:
+
+    def get_or_404(self, db:Session, model, item_id: int):
+        item = db.query(model)
+        if not item:
+            raise HTTPException(status_code=404, detail=f"Eintrag in"
+                                                        f"'{model.__tablename__}' mit ID '{item_id}'"
+                                                        f"nicht gefunden")
+        return item
+
+    
