@@ -1,5 +1,5 @@
-from http.client import HTTPException
-import auth as authenticator
+from fastapi import HTTPException
+import routers.auth as authenticator
 from fastapi_restful.cbv import cbv
 from pydantic import BaseModel
 import datetime
@@ -13,8 +13,6 @@ from fastapi import APIRouter
 
 from routers.auth import verify_api_key
 from routers.base import BaseAPI
-
-from Backend.models import DBUser
 
 router = APIRouter(prefix="/user", tags=["User"])
 
@@ -35,14 +33,14 @@ class UserLogin(BaseModel):
 
 class UserUpdateUsedStorage(BaseModel):
     user_id: int
-    used_storage: long
+    used_storage: int
 
 
 
 
 @cbv(router)
 class UserAPI(BaseAPI):
-    db: Session = Depends(get_db())
+    db: Session = Depends(get_db)
     api_key : str = Depends(verify_api_key)
 
 
@@ -69,15 +67,19 @@ class UserAPI(BaseAPI):
 
 @cbv(router)
 class UserLoginAPI(BaseAPI):
-    db: Session = Depends(get_db())
+    db: Session = Depends(get_db)
     @router.post("/register")
     def create_user(self, user: UserCreate):
+        print("KEY:", user.storage_plan_key)
         stored_plan = self.db.query(models.DBStoragePlanKeys).filter(models.DBStoragePlanKeys.key == user.storage_plan_key).first()
         if stored_plan:
             today = datetime.datetime.now()
-            new_user = models.DBUser(**user.model_dump(),
-                                     last_login= today,
-                                     storage_plan= int(stored_plan.storage))
+            new_user = models.DBUser(
+                email=user.email,
+                password=user.password,
+                last_login=today,
+                storage_plan=int(stored_plan.storage)
+            )
             self.db.add(new_user)
             self.db.commit()
             self.db.refresh(new_user)
@@ -89,7 +91,7 @@ class UserLoginAPI(BaseAPI):
     def login_user(self, user: UserLogin):
         logged_in_user = self.db.query(models.DBUser).filter(models.DBUser.email == user.email, models.DBUser.password == user.password).first()
         if logged_in_user:
-            session_key = authenticator.create_api_key(new_user.id)
+            session_key = authenticator.create_api_key(logged_in_user.id)
             logged_in_user.last_login = datetime.datetime.now()
             self.db.commit()
             self.db.refresh(logged_in_user)

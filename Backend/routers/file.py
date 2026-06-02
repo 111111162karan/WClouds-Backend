@@ -9,6 +9,7 @@ from fastapi.params import Depends
 from database import get_db
 from fastapi import APIRouter
 from routers.base import BaseAPI
+from routers.user import UserCreate
 
 router = APIRouter(prefix="/files", tags=["Files"])
 
@@ -23,7 +24,7 @@ class UserResponse(BaseModel):
 @cbv(router)
 class FileAPI(BaseAPI):
 
-    db: Session = Depends(get_db())
+    db: Session = Depends(get_db)
 
     @router.post("/")
     def create_user(self,name:UserCreate):

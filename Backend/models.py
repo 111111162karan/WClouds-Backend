@@ -31,7 +31,7 @@ class DBFolder(Base):
     path_id = Column(Integer, ForeignKey("path.id"))
 
 class DBPath(Base):
-    __tablename__ = "paths"
+    __tablename__ = "path"
     id = Column(Integer, primary_key=True, index=True)
     path = Column(String)
 
@@ -53,7 +53,7 @@ class DBFileHistory(Base):
     date = Column(DateTime)
     user_id = Column(Integer, ForeignKey("users.id"))
     file_id = Column(Integer, ForeignKey("files.id"))
-    path = Column(ForeignKey("paths.id"))
+    path = Column(ForeignKey("path.id"))
 
 
 
@@ -65,7 +65,7 @@ class DBFolderHistory(Base):
     date = Column(DateTime)
     user_id = Column(Integer, ForeignKey("users.id"))
     folder_id = Column(Integer, ForeignKey("folders.id"))
-    path = Column(ForeignKey("paths.id"))
+    path = Column(ForeignKey("path.id"))
 
 class DBStoragePlanKeys(Base):
     __tablename__ = "subscription_keys"

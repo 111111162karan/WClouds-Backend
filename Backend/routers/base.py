@@ -1,7 +1,5 @@
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
-from database import Base
-from auth import verify_api_key
 
 
 class BaseAPI:
