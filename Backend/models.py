@@ -25,10 +25,12 @@ class DBFile(Base):
 
 class DBFolder(Base):
     __tablename__ = "folders"
+
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String)
     owner_id = Column(Integer, ForeignKey("users.id"))
     path_id = Column(Integer, ForeignKey("path.id"))
+    parent_id = Column(Integer, ForeignKey("folders.id"), nullable=True)  # NEU
 
 class DBPath(Base):
     __tablename__ = "path"
@@ -76,4 +78,4 @@ class DBStoragePlanKeys(Base):
 
 
 
-    
+

@@ -21,6 +21,6 @@ def get_api_key(user_id: int) -> str:
 
 # Prüft das Passwort. Stimmt es nicht → HTTP 401 (Unauthorized)
 def verify_api_key(sent_api_key: str = Security(api_key_header)):
-    if sent_api_key not in api_keys :
+    if sent_api_key not in api_keys.values():
         raise HTTPException(status_code=401, detail="Ungültiger API-Key")
     return sent_api_key

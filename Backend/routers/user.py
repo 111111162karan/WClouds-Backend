@@ -4,6 +4,7 @@ from fastapi_restful.cbv import cbv
 from pydantic import BaseModel
 import datetime
 import models
+from pwdlib import PasswordHash
 
 from sqlalchemy.orm import Session
 from fastapi.params import Depends
@@ -36,7 +37,7 @@ class UserUpdateUsedStorage(BaseModel):
     used_storage: int
 
 
-
+password_hash = PasswordHash.recommended()
 
 @cbv(router)
 class UserAPI(BaseAPI):
@@ -70,13 +71,18 @@ class UserLoginAPI(BaseAPI):
     db: Session = Depends(get_db)
     @router.post("/register")
     def create_user(self, user: UserCreate):
+
+
         print("KEY:", user.storage_plan_key)
         stored_plan = self.db.query(models.DBStoragePlanKeys).filter(models.DBStoragePlanKeys.key == user.storage_plan_key).first()
         if stored_plan:
+            existing_user = self.db.query(models.DBUser).filter(models.DBUser.email == user.email).first()
+            if existing_user:
+                raise HTTPException(status_code=409, detail="Email already registered")
             today = datetime.datetime.now()
             new_user = models.DBUser(
                 email=user.email,
-                password=user.password,
+                password=password_hash.hash(user.password),
                 last_login=today,
                 storage_plan=int(stored_plan.storage)
             )
@@ -89,13 +95,13 @@ class UserLoginAPI(BaseAPI):
 
     @router.post("/login")
     def login_user(self, user: UserLogin):
-        logged_in_user = self.db.query(models.DBUser).filter(models.DBUser.email == user.email, models.DBUser.password == user.password).first()
-        if logged_in_user:
-            session_key = authenticator.create_api_key(logged_in_user.id)
-            logged_in_user.last_login = datetime.datetime.now()
+        db_user = self.db.query(models.DBUser).filter(models.DBUser.email == user.email).first()
+        if db_user and password_hash.verify(user.password, db_user.password):
+            session_key = authenticator.create_api_key(db_user.id)
+            db_user.last_login = datetime.datetime.now()
             self.db.commit()
-            self.db.refresh(logged_in_user)
-            return session_key
+            self.db.refresh(db_user)
+            return {"session_key": session_key, "user_id": db_user.id}
         else:
-            raise HTTPException(status_code=404, detail="Invalid storage plan key")
+            raise HTTPException(status_code=401, detail="Invalid email or password")
 
