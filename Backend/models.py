@@ -1,7 +1,8 @@
-from sqlalchemy import Column, Integer, String, DateTime,Boolean ,ForeignKey, Float
+from sqlalchemy import Column, Integer, String, DateTime, Boolean, ForeignKey, Float
 from sqlalchemy.orm import relationship
 
 from database import Base
+
 
 class DBUser(Base):
     __tablename__ = "users"
@@ -11,8 +12,7 @@ class DBUser(Base):
     password = Column(String)
     last_login = Column(DateTime)
     used_storage = Column(Integer, default=0)   # in Gigabytes
-    storage_plan = Column(Integer)   # in Gigabytes
-
+    storage_plan = Column(Integer)              # in Gigabytes
 
 
 class DBFile(Base):
@@ -22,6 +22,10 @@ class DBFile(Base):
     name = Column(String)
     owner_id = Column(Integer, ForeignKey("users.id"))
     path_id = Column(Integer, ForeignKey("path.id"))
+    nonce = Column(String, nullable=True)       # KI | Prompt: die dateien die gespeichert werden
+                                                # sollen auch verschlüsselt werden und erklär mir dann
+                                                # wie es funktioniert
+
 
 class DBFolder(Base):
     __tablename__ = "folders"
@@ -30,10 +34,12 @@ class DBFolder(Base):
     name = Column(String)
     owner_id = Column(Integer, ForeignKey("users.id"))
     path_id = Column(Integer, ForeignKey("path.id"))
-    parent_id = Column(Integer, ForeignKey("folders.id"), nullable=True)  # NEU
+    parent_id = Column(Integer, ForeignKey("folders.id"), nullable=True)
+
 
 class DBPath(Base):
     __tablename__ = "path"
+
     id = Column(Integer, primary_key=True, index=True)
     path = Column(String)
 
@@ -51,31 +57,28 @@ class DBFileHistory(Base):
     __tablename__ = "file_history"
 
     backup_file_id = Column(Integer, primary_key=True, index=True)
-    size = Column(Float) # in Gigabytes
+    size = Column(Float)    # in Gigabytes
     date = Column(DateTime)
     user_id = Column(Integer, ForeignKey("users.id"))
     file_id = Column(Integer, ForeignKey("files.id"))
     path = Column(ForeignKey("path.id"))
 
 
-
 class DBFolderHistory(Base):
     __tablename__ = "folder_history"
 
     backup_file_id = Column(Integer, primary_key=True, index=True)
-    size = Column(Float) # in Gigabytes
+    size = Column(Float)    # in Gigabytes
     date = Column(DateTime)
     user_id = Column(Integer, ForeignKey("users.id"))
     folder_id = Column(Integer, ForeignKey("folders.id"))
     path = Column(ForeignKey("path.id"))
 
+
 class DBStoragePlanKeys(Base):
     __tablename__ = "subscription_keys"
+
     id = Column(Integer, primary_key=True, index=True)
     key = Column(String)
-    storage = Column(Integer) # in Gigabytes
+    storage = Column(Integer)   # in Gigabytes
     redeemed = Column(Boolean)
-
-
-
-
