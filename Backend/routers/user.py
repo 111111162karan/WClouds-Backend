@@ -48,7 +48,7 @@ class UserAPI(BaseAPI):
 
     @router.get("/{user_id}", response_model=UserResponse)
     def get_user(self, user_id: int):
-        self.get_or_404(self.db, models.DBUser, user_id)
+        return self.get_or_404(self.db, models.DBUser, user_id)
 
     @router.patch("/updateusedstorage/{user_id}")
     def update_used_storage(self, user_id: int, body: UserUpdateUsedStorage):
@@ -89,6 +89,8 @@ class UserLoginAPI(BaseAPI):
             self.db.add(new_user)
             self.db.commit()
             self.db.refresh(new_user)
+            stored_plan.redeemed = True
+            self.db.commit()
             raise HTTPException(status_code=201, detail="User created")
         else:
             raise HTTPException(status_code=401, detail="Invalid storage plan key")

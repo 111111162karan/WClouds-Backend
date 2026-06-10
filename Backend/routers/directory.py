@@ -27,6 +27,7 @@ def build_directory_tree(db: Session, folder: models.DBFolder) -> dict:
     ).all()
 
     files = db.query(models.DBFile).filter(
+        models.DBFile.owner_id == folder.owner_id,
         models.DBFile.path_id == folder.path_id
     ).all()
 

@@ -10,7 +10,9 @@ from fastapi.params import Depends
 
 from database import get_db
 from fastapi import APIRouter, UploadFile, File, HTTPException, Form  # KI | Prompt: die dateien die gespeichert werden
-                                                # sollen auch verschlüsselt werden und erklär mir dann
+
+from routers.auth import verify_api_key
+# sollen auch verschlüsselt werden und erklär mir dann
                                                 # wie es funktioniert
 
 from routers.base import BaseAPI
@@ -38,6 +40,7 @@ class FileResponse(BaseModel):
 class FileAPI(BaseAPI):
 
     db: Session = Depends(get_db)
+    api_key: str = Depends(verify_api_key)
 
     @router.post("/")
     def upload_file(
