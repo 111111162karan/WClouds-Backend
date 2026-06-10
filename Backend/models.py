@@ -22,6 +22,7 @@ class DBFile(Base):
     name = Column(String)
     owner_id = Column(Integer, ForeignKey("users.id"))
     path_id = Column(Integer, ForeignKey("path.id"))
+    folder_id = Column(Integer, ForeignKey("folders.id"), nullable=True)
     nonce = Column(String, nullable=True)       # KI | Prompt: die dateien die gespeichert werden
                                                 # sollen auch verschlüsselt werden und erklär mir dann
                                                 # wie es funktioniert

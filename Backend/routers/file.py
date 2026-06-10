@@ -46,20 +46,22 @@ class FileAPI(BaseAPI):
     def upload_file(
         self,
         owner_id: int = Form(...),
-        nonce: str = Form(...),              # KI | Prompt: die dateien die gespeichert werden
+        nonce: str = Form(...),
+        folder_id: int = Form(None),
+        original_name: str = Form(...),
+        uploaded_file: UploadFile = File(...)
+                                                # KI | Prompt: die dateien die gespeichert werden
                                                 # sollen auch verschlüsselt werden und erklär mir dann
                                                 # wie es funktioniert
-        uploaded_file: UploadFile = File(...)
+
     ):
         # KI | Prompt: die dateien die gespeichert werden
         # sollen auch verschlüsselt werden und erklär mir dann
         # wie es funktioniert
         encrypted_data = uploaded_file.file.read()
-
-        # KI | Prompt: die dateien die gespeichert werden
-        # sollen auch verschlüsselt werden und erklär mir dann
-        # wie es funktioniert
-        save_path = os.path.join(UPLOAD_DIR, f"{uploaded_file.filename}.enc")
+        user_upload_dir = os.path.join(UPLOAD_DIR, str(owner_id))
+        os.makedirs(user_upload_dir, exist_ok=True)
+        save_path = os.path.join(user_upload_dir, f"{uploaded_file.filename}.enc")
         with open(save_path, "wb") as f:
             f.write(encrypted_data)
 
@@ -69,9 +71,10 @@ class FileAPI(BaseAPI):
         self.db.refresh(db_path)
 
         db_file = models.DBFile(
-            name=uploaded_file.filename,
+            name=original_name,
             owner_id=owner_id,
             path_id=db_path.id,
+            folder_id=folder_id,
             nonce=nonce                      # KI
         )
         self.db.add(db_file)

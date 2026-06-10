@@ -1,3 +1,5 @@
+import base64
+
 from fastapi import HTTPException
 import routers.auth as authenticator
 from fastapi_restful.cbv import cbv
@@ -72,32 +74,65 @@ class UserLoginAPI(BaseAPI):
     @router.post("/register")
     def create_user(self, user: UserCreate):
 
+        try:
+            decoded_key = base64.b64decode(user.storage_plan_key).decode("utf-8").strip()
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid storage plan key encoding")
 
-        print("KEY:", user.storage_plan_key)
-        stored_plan = self.db.query(models.DBStoragePlanKeys).filter(models.DBStoragePlanKeys.key == user.storage_plan_key).first()
-        if stored_plan:
-            existing_user = self.db.query(models.DBUser).filter(models.DBUser.email == user.email).first()
-            if existing_user:
-                raise HTTPException(status_code=409, detail="Email already registered")
-            today = datetime.datetime.now()
-            new_user = models.DBUser(
-                email=user.email,
-                password=password_hash.hash(user.password),
-                last_login=today,
-                storage_plan=int(stored_plan.storage)
-            )
-            self.db.add(new_user)
-            self.db.commit()
-            self.db.refresh(new_user)
-            stored_plan.redeemed = True
-            self.db.commit()
-            raise HTTPException(status_code=201, detail="User created")
-        else:
+        stored_plan = (
+            self.db.query(models.DBStoragePlanKeys)
+            .filter(models.DBStoragePlanKeys.key == decoded_key)
+            .first()
+        )
+        if not stored_plan:
             raise HTTPException(status_code=401, detail="Invalid storage plan key")
+
+        if stored_plan.redeemed:
+            raise HTTPException(status_code=409, detail="Storage plan key already redeemed")
+
+        existing_user = (
+            self.db.query(models.DBUser)
+            .filter(models.DBUser.email == user.email)
+            .first()
+        )
+        if existing_user:
+            raise HTTPException(status_code=409, detail="Email already registered")
+
+        # The client sends a SHA-256 hex digest; hash it once more with bcrypt
+        # so the DB never stores a raw or single-hashed value.
+        new_user = models.DBUser(
+            email=user.email,
+            password=password_hash.hash(user.password),
+            last_login=datetime.datetime.now(),
+            storage_plan=int(stored_plan.storage),
+        )
+        self.db.add(new_user)
+        self.db.commit()
+        self.db.refresh(new_user)
+
+        stored_plan.redeemed = True
+        self.db.commit()
+
+        db_path = models.DBPath(path=f"/home/user{new_user.id}/")
+        self.db.add(db_path)
+        self.db.commit()
+        self.db.refresh(db_path)
+
+        root_folder = models.DBFolder(
+            name="Root",
+            owner_id=new_user.id,
+            path_id=db_path.id,
+            parent_id=None
+        )
+        self.db.add(root_folder)
+        self.db.commit()
+
+        raise HTTPException(status_code=201, detail="User created")
 
     @router.post("/login")
     def login_user(self, user: UserLogin):
         db_user = self.db.query(models.DBUser).filter(models.DBUser.email == user.email).first()
+        
         if db_user and password_hash.verify(user.password, db_user.password):
             session_key = authenticator.create_api_key(db_user.id)
             db_user.last_login = datetime.datetime.now()
