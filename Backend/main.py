@@ -15,6 +15,7 @@ app = FastAPI(title="WClouds", description="Self hosted Cloud Service!", version
 app.include_router(user.router)
 app.include_router(file.router)
 app.include_router(directory.router)
+app.include_router(sharing.router)
 @app.get("/")
 def root():
     return {"message": "Hello to my World\n Besuche /docs für die Swagger-UI"}
