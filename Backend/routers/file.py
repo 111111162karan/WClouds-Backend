@@ -1,6 +1,7 @@
 from fastapi_restful.cbv import cbv
 from fastapi.responses import FileResponse as FastAPIFileResponse  # KI
 from pydantic import BaseModel
+import email.header
 
 import models
 import os
@@ -55,13 +56,19 @@ class FileAPI(BaseAPI):
                                                 # wie es funktioniert
 
     ):
+        # Dateiname dekodieren falls MIME-encoded
+        decoded = email.header.decode_header(uploaded_file.filename)[0]
+        if isinstance(decoded[0], bytes):
+            filename = decoded[0].decode(decoded[1] or 'utf-8')
+        else:
+            filename = decoded[0]
         # KI | Prompt: die dateien die gespeichert werden
         # sollen auch verschlüsselt werden und erklär mir dann
         # wie es funktioniert
         encrypted_data = uploaded_file.file.read()
         user_upload_dir = os.path.join(UPLOAD_DIR, str(owner_id))
         os.makedirs(user_upload_dir, exist_ok=True)
-        save_path = os.path.join(user_upload_dir, f"{uploaded_file.filename}.enc")
+        save_path = os.path.join(user_upload_dir, f"{filename}.enc")
         with open(save_path, "wb") as f:
             f.write(encrypted_data)
 
@@ -112,12 +119,24 @@ class FileAPI(BaseAPI):
             .all()
         return files
 
-    @router.get("/info/{file_id}", response_model=FileResponse)
+    @router.get("/info/{file_id}")
     def get_file_info(self, file_id: int):
         file = self.db.query(models.DBFile).filter(models.DBFile.id == file_id).first()
         if not file:
             raise HTTPException(status_code=404, detail="File not found")
-        return file
+
+        db_path = self.db.query(models.DBPath).filter(models.DBPath.id == file.path_id).first()
+        size_mb = 0.0
+        if db_path and os.path.exists(db_path.path):
+            size_mb = round(os.path.getsize(db_path.path) / (1024 * 1024), 3)
+        return {
+            "Name": file.name,
+            "Owner": file.owner_id,
+            "ChangedUser": file.owner_id,
+            "ChangedDate": None,
+            "ChangedTime": None,
+            "Size": size_mb
+        }
 
     # KI | Prompt: die dateien die gespeichert werden
     # sollen auch verschlüsselt werden und erklär mir dann

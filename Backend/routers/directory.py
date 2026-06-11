@@ -10,6 +10,9 @@ import models
 from database import get_db
 from routers.auth import verify_api_key
 from routers.base import BaseAPI
+import io
+import zipfile
+from urllib.parse import quote, unquote
 
 router = APIRouter(prefix="/directories", tags=["Directories"])
 
@@ -20,6 +23,32 @@ class DirectoryCreate(BaseModel):
     parent_id: Optional[int] = None
     owner_id: int
 
+
+def add_folder_to_zip(zf: zipfile.ZipFile, db: Session, folder: models.DBFolder, prefix: str):
+    files = db.query(models.DBFile).filter(models.DBFile.folder_id == folder.id).all()
+    for f in files:
+        path = db.query(models.DBPath).filter(models.DBPath.id == f.path_id).first()
+        if path and _os.path.exists(path.path):
+            with open(path.path, "rb") as enc_file:
+                encrypted = enc_file.read()
+            zf.writestr(f"{prefix}{f.name}", encrypted)
+            zf.writestr(f"{prefix}{f.name}.nonce", f.nonce)  # ← Nonce separat
+
+    subfolders = db.query(models.DBFolder).filter(models.DBFolder.parent_id == folder.id).all()
+    for sub in subfolders:
+        add_folder_to_zip(zf, db, sub, f"{prefix}{sub.name}/")
+
+def get_folder_size(db: Session, folder: models.DBFolder) -> float:
+    total = 0.0
+    files = db.query(models.DBFile).filter(models.DBFile.folder_id == folder.id).all()
+    for f in files:
+        path = db.query(models.DBPath).filter(models.DBPath.id == f.path_id).first()
+        if path and _os.path.exists(path.path):
+            total += _os.path.getsize(path.path)
+    subfolders = db.query(models.DBFolder).filter(models.DBFolder.parent_id == folder.id).all()
+    for sub in subfolders:
+        total += get_folder_size(db, sub) * 1024 * 1024  # zurück zu bytes
+    return round(total / (1024 * 1024), 3)
 
 # KI | Prompt: gib mir im backend also bei den python das fertige directory.py
 def build_directory_tree(db: Session, folder: models.DBFolder) -> dict:
@@ -100,18 +129,11 @@ class DirectoryAPI(BaseAPI):
     # KI | Prompt: gib mir im backend also bei den python das fertige directory.py
     @router.post("/")
     def create_directory(self, body: DirectoryCreate):
-
         if body.parent_id:
-            parent = self.get_or_404(
-                self.db,
-                models.DBFolder,
-                body.parent_id
-            )
-
+            parent = self.get_or_404(self.db, models.DBFolder, body.parent_id)
             parent_path = self.db.query(models.DBPath).filter(
                 models.DBPath.id == parent.path_id
             ).first()
-
             new_path_str = f"{parent_path.path}{body.name}/"
         else:
             new_path_str = f"/home/user{body.owner_id}/"
@@ -127,12 +149,40 @@ class DirectoryAPI(BaseAPI):
             path_id=new_path.id,
             parent_id=body.parent_id
         )
-
         self.db.add(new_folder)
         self.db.commit()
         self.db.refresh(new_folder)
 
-        raise HTTPException(
-            status_code=201,
-            detail="Directory created"
+        return {"ID": new_folder.id, "Name": new_folder.name, "SubDirectories": [], "Content": []}
+
+
+
+    @router.get("/info/{directory_id}")
+    def get_directory_info(self, directory_id: int):
+        folder = self.get_or_404(self.db, models.DBFolder, directory_id)
+        size = get_folder_size(self.db, folder)
+        return {
+            "Name": folder.name,
+            "Owner": folder.owner_id,
+            "ChangedUser": folder.owner_id,
+            "ChangedDate": None,
+            "ChangedTime": None,
+            "Size": size
+        }
+
+    @router.get("/download/{directory_id}")
+    def download_directory(self, directory_id: int):
+        folder = self.get_or_404(self.db, models.DBFolder, directory_id)
+
+        zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+            add_folder_to_zip(zf, self.db, folder, "")
+
+        zip_buffer.seek(0)
+        from fastapi.responses import StreamingResponse
+        return StreamingResponse(
+            zip_buffer,
+            media_type="application/zip",
+            headers={"Content-Disposition": f"attachment; filename={folder.name}.zip",
+                     "X-Folder-Name": folder.name}
         )

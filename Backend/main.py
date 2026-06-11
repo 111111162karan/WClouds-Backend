@@ -2,7 +2,7 @@ import uvicorn
 from fastapi import FastAPI
 from database import engine
 import models
-from routers import user, file, directory
+from routers import user, file, directory, sharing
 
 # Einstiegspunkt
 # erstellt alle Tabellen in der Datenbank (falls nicht existent)
