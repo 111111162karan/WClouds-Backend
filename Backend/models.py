@@ -48,7 +48,8 @@ class DBPath(Base):
 class DBAccess(Base):
     __tablename__ = "access"
 
-    member_id = Column(Integer, primary_key=True, index=True)
+    access_id = Column(Integer, primary_key=True, index=True)
+    member_id = Column(Integer, index=True)
     file_id = Column(Integer, ForeignKey("files.id"))
     can_read = Column(Boolean, default=False)
     can_write = Column(Boolean, default=False)

@@ -94,3 +94,25 @@ class SharingAPI(BaseAPI):
             }
             for a in access_list
         ]
+
+    # AI Prompt: can a user now see files if it got shared to them and if not it should make another folder on the datapage besides root called shared
+    @router.get("/shared-with-me/{user_id}")
+    def get_shared_with_me(self, user_id: int):
+        access_list = self.db.query(models.DBAccess).filter(
+            models.DBAccess.member_id == user_id
+        ).all()
+
+        result = []
+        for access in access_list:
+            file = self.db.query(models.DBFile).filter(models.DBFile.id == access.file_id).first()
+            if not file:
+                continue
+            import os as _os
+            result.append({
+                "ID": file.id,
+                "FileName": _os.path.splitext(file.name)[0],
+                "Extension": _os.path.splitext(file.name)[1],
+                "CanRead": access.can_read,
+                "CanWrite": access.can_write
+            })
+        return result
