@@ -68,6 +68,13 @@ class UserAPI(BaseAPI):
         self.db.refresh(db_user)
         raise HTTPException(status_code=200, detail="Last login updated")
 
+    @router.get("/by-email/{email}", response_model=UserResponse)
+    def get_user_by_email(self, email: str):
+        user = self.db.query(models.DBUser).filter(models.DBUser.email == email).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        return user
+
 @cbv(router)
 class UserLoginAPI(BaseAPI):
     db: Session = Depends(get_db)
