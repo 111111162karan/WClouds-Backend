@@ -41,12 +41,20 @@ class UserUpdateUsedStorage(BaseModel):
 
 password_hash = PasswordHash.recommended()
 
+
+
+
 @cbv(router)
 class UserAPI(BaseAPI):
     db: Session = Depends(get_db)
     api_key : str = Depends(verify_api_key)
 
-
+    @router.get("/by-email/{email}", response_model=UserResponse)
+    def get_user_by_email(self, email: str):
+        user = self.db.query(models.DBUser).filter(models.DBUser.email == email).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        return user
 
     @router.get("/{user_id}", response_model=UserResponse)
     def get_user(self, user_id: int):
@@ -68,12 +76,7 @@ class UserAPI(BaseAPI):
         self.db.refresh(db_user)
         raise HTTPException(status_code=200, detail="Last login updated")
 
-    @router.get("/by-email/{email}", response_model=UserResponse)
-    def get_user_by_email(self, email: str):
-        user = self.db.query(models.DBUser).filter(models.DBUser.email == email).first()
-        if not user:
-            raise HTTPException(status_code=404, detail="User not found")
-        return user
+
 
 @cbv(router)
 class UserLoginAPI(BaseAPI):
