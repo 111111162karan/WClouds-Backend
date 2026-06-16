@@ -9,10 +9,12 @@ import os
 from sqlalchemy.orm import Session
 from fastapi.params import Depends
 
+
+
 from database import get_db
 from fastapi import APIRouter, UploadFile, File, HTTPException, Form  # KI | Prompt: die dateien die gespeichert werden
 
-from routers.auth import verify_api_key
+from routers.auth import verify_api_key, get_user_id_from_key
 # sollen auch verschlüsselt werden und erklär mir dann
                                                 # wie es funktioniert
 
@@ -97,6 +99,8 @@ class FileAPI(BaseAPI):
     # wie es funktioniert
     @router.get("/download/{file_id}")
     def download_file(self, file_id: int):
+        requester_id = get_user_id_from_key(self.api_key)
+
         db_file = self.db.query(models.DBFile).filter(models.DBFile.id == file_id).first()
         if not db_file:
             raise HTTPException(status_code=404, detail="File not found")
@@ -104,6 +108,16 @@ class FileAPI(BaseAPI):
         db_path = self.db.query(models.DBPath).filter(models.DBPath.id == db_file.path_id).first()
         if not db_path or not os.path.exists(db_path.path):
             raise HTTPException(status_code=404, detail="File not found on disk")
+
+        # KI | Prompt: Canread und canwrite soll richtig funktionieren
+        if db_file.owner_id != requester_id:
+            access = self.db.query(models.DBAccess).filter(
+                models.DBAccess.file_id == file_id,
+                models.DBAccess.member_id == requester_id,
+                models.DBAccess.can_read == True
+            ).first()
+            if not access:
+                raise HTTPException(status_code=403, detail="Kein Lesezugriff")
 
         return FastAPIFileResponse(
             path=db_path.path,
@@ -143,9 +157,21 @@ class FileAPI(BaseAPI):
     # wie es funktioniert
     @router.delete("/{file_id}")
     def delete_file(self, file_id: int):
+        requester_id = get_user_id_from_key(self.api_key)
+
         db_file = self.db.query(models.DBFile).filter(models.DBFile.id == file_id).first()
         if not db_file:
             raise HTTPException(status_code=404, detail="File not found")
+
+        # KI | Prompt: Canread und canwrite soll richtig funktionieren
+        if db_file.owner_id != requester_id:
+            access = self.db.query(models.DBAccess).filter(
+                models.DBAccess.file_id == file_id,
+                models.DBAccess.member_id == requester_id,
+                models.DBAccess.can_write == True
+            ).first()
+            if not access:
+                raise HTTPException(status_code=403, detail="Kein Schreibzugriff")
 
         db_path = self.db.query(models.DBPath).filter(models.DBPath.id == db_file.path_id).first()
 

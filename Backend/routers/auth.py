@@ -26,3 +26,11 @@ def verify_api_key(sent_api_key: str = Security(api_key_header)):
     if sent_api_key not in api_keys.values():
         raise HTTPException(status_code=401, detail="Ungültiger API-Key")
     return sent_api_key
+
+
+# KI | Prompt: Canread und canwrite soll richtig funktionieren
+def get_user_id_from_key(api_key: str) -> int:
+    for user_id, key in api_keys.items():
+        if key == api_key:
+            return user_id
+    raise HTTPException(status_code=401, detail="Ungültiger API-Key")
