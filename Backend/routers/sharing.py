@@ -9,7 +9,7 @@ from fastapi.params import Depends
 from database import get_db
 from fastapi import APIRouter, HTTPException
 
-from routers.auth import verify_api_key
+from routers.auth import get_current_user_id
 from routers.base import BaseAPI
 
 
@@ -27,14 +27,21 @@ class ShareFileRequest(BaseModel):
 class SharingAPI(BaseAPI):
 
     db: Session = Depends(get_db)
-    api_key: str = Depends(verify_api_key)
+    requester_id: int = Depends(get_current_user_id)
 
     @router.post("/file")
     def share_file(self, request: ShareFileRequest):
-        # Check that the file exists
-        file = self.db.query(models.DBFile).filter(models.DBFile.id == request.fileId).first()
-        if not file:
-            raise HTTPException(status_code=404, detail="File not found")
+        # KI | Prompt: mir ist gerade aufgefallen ich habe im auth skript eine
+        # # funktion die da ist zum schauen ob der user auch rechte auf eine datei
+        # # hat bzw get user id by key oder so das soll bite bei jedem endpunkt gecheckt
+        # # werden ob zb ein file auch wirklich einem user gehört etc
+
+        # Nur der Eigentümer einer Datei darf sie teilen - sonst könnte
+        # sich jeder mit gültigem API-Key selbst Zugriff auf fremde
+        # Dateien geben.
+        file = self.get_or_404(self.db, models.DBFile, request.fileId)
+        if file.owner_id != self.requester_id:
+            raise HTTPException(status_code=403, detail="Nur der Eigentümer kann eine Datei teilen")
 
         # Check that all member users exist
         for member_id in request.memberIds:
@@ -66,6 +73,10 @@ class SharingAPI(BaseAPI):
 
     @router.delete("/file/{file_id}/member/{member_id}")
     def revoke_access(self, file_id: int, member_id: int):
+        file = self.get_or_404(self.db, models.DBFile, file_id)
+        if file.owner_id != self.requester_id:
+            raise HTTPException(status_code=403, detail="Nur der Eigentümer kann Zugriffsrechte entziehen")
+
         access = self.db.query(models.DBAccess).filter(
             models.DBAccess.file_id == file_id,
             models.DBAccess.member_id == member_id
@@ -80,7 +91,9 @@ class SharingAPI(BaseAPI):
 
     @router.get("/file/{file_id}")
     def get_file_members(self, file_id: int):
-        self.get_or_404(self.db, models.DBFile, file_id)
+        file = self.get_or_404(self.db, models.DBFile, file_id)
+        if file.owner_id != self.requester_id:
+            raise HTTPException(status_code=403, detail="Nur der Eigentümer kann die Mitgliederliste sehen")
 
         access_list = self.db.query(models.DBAccess).filter(
             models.DBAccess.file_id == file_id
@@ -98,6 +111,8 @@ class SharingAPI(BaseAPI):
     # AI Prompt: can a user now see files if it got shared to them and if not it should make another folder on the datapage besides root called shared
     @router.get("/shared-with-me/{user_id}")
     def get_shared_with_me(self, user_id: int):
+        self.require_self(self.requester_id, user_id)
+
         access_list = self.db.query(models.DBAccess).filter(
             models.DBAccess.member_id == user_id
         ).all()

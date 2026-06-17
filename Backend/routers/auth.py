@@ -34,3 +34,14 @@ def get_user_id_from_key(api_key: str) -> int:
         if key == api_key:
             return user_id
     raise HTTPException(status_code=401, detail="Ungültiger API-Key")
+
+
+# KI | Prompt: mir ist gerade aufgefallen ich habe im auth skript eine
+# funktion die da ist zum schauen ob der user auch rechte auf eine datei
+# hat bzw get user id by key oder so das soll bite bei jedem endpunkt gecheckt
+# werden ob zb ein file auch wirklich einem user gehört etc
+def get_current_user_id(sent_api_key: str = Security(api_key_header)) -> int:
+    for user_id, key in api_keys.items():
+        if key == sent_api_key:
+            return user_id
+    raise HTTPException(status_code=401, detail="Ungültiger API-Key")

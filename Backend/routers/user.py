@@ -14,10 +14,10 @@ from fastapi.params import Depends
 from database import get_db
 from fastapi import APIRouter
 
-from routers.auth import verify_api_key
 from routers.base import BaseAPI
 
 router = APIRouter(prefix="/user", tags=["User"])
+
 
 # Pydentic Schemas
 class UserCreate(BaseModel):
@@ -25,14 +25,17 @@ class UserCreate(BaseModel):
     password: str
     storage_plan_key: str
 
+
 class UserResponse(BaseModel):
     id: int
-    email : str
+    email: str
     storage_plan: int
+
 
 class UserLogin(BaseModel):
     email: str
     password: str
+
 
 class UserUpdateUsedStorage(BaseModel):
     user_id: int
@@ -42,12 +45,10 @@ class UserUpdateUsedStorage(BaseModel):
 password_hash = PasswordHash.recommended()
 
 
-
-
 @cbv(router)
 class UserAPI(BaseAPI):
     db: Session = Depends(get_db)
-    api_key : str = Depends(verify_api_key)
+    requester_id: int = Depends(authenticator.get_current_user_id)
 
     @router.get("/by-email/{email}", response_model=UserResponse)
     def get_user_by_email(self, email: str):
@@ -58,10 +59,12 @@ class UserAPI(BaseAPI):
 
     @router.get("/{user_id}", response_model=UserResponse)
     def get_user(self, user_id: int):
+        self.require_self(self.requester_id, user_id)
         return self.get_or_404(self.db, models.DBUser, user_id)
 
     @router.patch("/updateusedstorage/{user_id}")
     def update_used_storage(self, user_id: int, body: UserUpdateUsedStorage):
+        self.require_self(self.requester_id, user_id)
         db_user = self.get_or_404(self.db, models.DBUser, user_id)
         db_user.used_storage = body.used_storage
         self.db.commit()
@@ -70,6 +73,7 @@ class UserAPI(BaseAPI):
 
     @router.patch("/updatelogin/{user_id}")
     def update_last_login(self, user_id: int):
+        self.require_self(self.requester_id, user_id)
         db_user = self.get_or_404(self.db, models.DBUser, user_id)
         db_user.last_login = datetime.datetime.now()
         self.db.commit()
@@ -77,10 +81,10 @@ class UserAPI(BaseAPI):
         raise HTTPException(status_code=200, detail="Last login updated")
 
 
-
 @cbv(router)
 class UserLoginAPI(BaseAPI):
     db: Session = Depends(get_db)
+
     @router.post("/register")
     def create_user(self, user: UserCreate):
 
@@ -142,7 +146,7 @@ class UserLoginAPI(BaseAPI):
     @router.post("/login")
     def login_user(self, user: UserLogin):
         db_user = self.db.query(models.DBUser).filter(models.DBUser.email == user.email).first()
-        
+
         if db_user and password_hash.verify(user.password, db_user.password):
             session_key = authenticator.create_api_key(db_user.id)
             db_user.last_login = datetime.datetime.now()

@@ -8,7 +8,7 @@ from typing import Optional
 import os as _os
 import models
 from database import get_db
-from routers.auth import verify_api_key
+from routers.auth import get_current_user_id
 from routers.base import BaseAPI
 import io
 import zipfile
@@ -84,10 +84,12 @@ def build_directory_tree(db: Session, folder: models.DBFolder) -> dict:
 class DirectoryAPI(BaseAPI):
 
     db: Session = Depends(get_db)
-    api_key: str = Depends(verify_api_key)
+    requester_id: int = Depends(get_current_user_id)
 
     @router.get("/{user_id}")
     def get_directory(self, user_id: int):
+        self.require_self(self.requester_id, user_id)
+
         root = (
             self.db.query(models.DBFolder)
             .filter(
@@ -118,6 +120,8 @@ class DirectoryAPI(BaseAPI):
 
     @router.get("/root/{user_id}")
     def get_root_directory(self, user_id: int):
+        self.require_self(self.requester_id, user_id)
+
         root = self.db.query(models.DBFolder).filter(
             models.DBFolder.owner_id == user_id,
             models.DBFolder.parent_id == None
@@ -129,8 +133,10 @@ class DirectoryAPI(BaseAPI):
     # KI | Prompt: gib mir im backend also bei den python das fertige directory.py
     @router.post("/")
     def create_directory(self, body: DirectoryCreate):
+        self.require_self(self.requester_id, body.owner_id)
+
         if body.parent_id:
-            parent = self.get_or_404(self.db, models.DBFolder, body.parent_id)
+            parent = self.require_folder_owner(self.db, body.parent_id, self.requester_id)
             parent_path = self.db.query(models.DBPath).filter(
                 models.DBPath.id == parent.path_id
             ).first()
@@ -159,7 +165,7 @@ class DirectoryAPI(BaseAPI):
 
     @router.get("/info/{directory_id}")
     def get_directory_info(self, directory_id: int):
-        folder = self.get_or_404(self.db, models.DBFolder, directory_id)
+        folder = self.require_folder_owner(self.db, directory_id, self.requester_id)
         size = get_folder_size(self.db, folder)
         return {
             "Name": folder.name,
@@ -172,7 +178,7 @@ class DirectoryAPI(BaseAPI):
 
     @router.get("/download/{directory_id}")
     def download_directory(self, directory_id: int):
-        folder = self.get_or_404(self.db, models.DBFolder, directory_id)
+        folder = self.require_folder_owner(self.db, directory_id, self.requester_id)
 
         zip_buffer = io.BytesIO()
         with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
