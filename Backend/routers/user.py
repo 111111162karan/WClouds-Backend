@@ -16,8 +16,29 @@ from fastapi import APIRouter
 
 from routers.base import BaseAPI
 
+import re
+
 router = APIRouter(prefix="/user", tags=["User"])
 
+
+# Copied from Website
+def is_valid_email(email):
+
+    """Check if the email is a valid format."""
+
+    # Regular expression for validating an Email
+
+    regex = r'^[a-z0-9]+[\._]?[a-z0-9]+[@]\w+[.]\w+$'
+
+    # If the string matches the regex, it is a valid email
+
+    if re.match(regex, email):
+
+        return True
+
+    else:
+
+        return False
 
 # Pydentic Schemas
 class UserCreate(BaseModel):
@@ -114,6 +135,11 @@ class UserLoginAPI(BaseAPI):
 
         # The client sends a SHA-256 hex digest; hash it once more with bcrypt
         # so the DB never stores a raw or single-hashed value.
+        # Email check:
+        if is_valid_email(user.email) == False:
+            raise HTTPException(status_code=400, detail="Invalid email syntax")
+
+
         new_user = models.DBUser(
             email=user.email,
             password=password_hash.hash(user.password),
