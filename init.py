@@ -7,14 +7,16 @@ import shutil
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "Backend"))
+_backend_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Backend")
+os.chdir(_backend_dir)
+sys.path.insert(0, _backend_dir)
 
 from database import SessionLocal, engine
 import models
 
 models.Base.metadata.create_all(bind=engine)
 
-UPLOADS_DIR = os.path.join(os.path.dirname(__file__), "Backend", "uploads")
+UPLOADS_DIR = os.path.join(_backend_dir, "uploads")
 
 def _now():
     return datetime.now(ZoneInfo("Europe/Vienna")).replace(tzinfo=None)
