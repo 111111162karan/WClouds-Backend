@@ -2,6 +2,10 @@ from fastapi_restful.cbv import cbv
 from fastapi.responses import FileResponse as FastAPIFileResponse  # KI
 from pydantic import BaseModel
 from datetime import datetime
+from zoneinfo import ZoneInfo
+
+def _now():
+    return datetime.now(ZoneInfo("Europe/Vienna")).replace(tzinfo=None)
 import uuid
 
 import models
@@ -134,7 +138,7 @@ class FileAPI(BaseAPI):
 
         history = models.DBFileHistory(
             size=size_gb,
-            date=datetime.utcnow(),
+            date=_now(),
             user_id=owner_id,
             file_id=db_file.id,
             path=db_path.id,
@@ -144,7 +148,7 @@ class FileAPI(BaseAPI):
         if folder_id is not None:
             folder_history = models.DBFolderHistory(
                 size=size_gb,
-                date=datetime.utcnow(),
+                date=_now(),
                 user_id=owner_id,
                 folder_id=folder_id,
                 path=db_path.id
@@ -267,7 +271,7 @@ class FileAPI(BaseAPI):
         # History-Eintrag für neue Version
         history = models.DBFileHistory(
             size=new_size_gb,
-            date=datetime.utcnow(),
+            date=_now(),
             user_id=self.requester_id,
             file_id=file_id,
             path=new_db_path.id,
@@ -277,7 +281,7 @@ class FileAPI(BaseAPI):
         if db_file.folder_id is not None:
             self.db.add(models.DBFolderHistory(
                 size=new_size_gb,
-                date=datetime.utcnow(),
+                date=_now(),
                 user_id=self.requester_id,
                 folder_id=db_file.folder_id,
                 path=new_db_path.id

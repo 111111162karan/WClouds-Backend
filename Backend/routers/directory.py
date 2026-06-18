@@ -11,6 +11,10 @@ from database import get_db
 from routers.auth import get_current_user_id
 from routers.base import BaseAPI, sanitize_name, safe_header_value
 from datetime import datetime
+from zoneinfo import ZoneInfo
+
+def _now():
+    return datetime.now(ZoneInfo("Europe/Vienna")).replace(tzinfo=None)
 import io
 import zipfile
 from urllib.parse import quote, unquote
@@ -204,7 +208,7 @@ class DirectoryAPI(BaseAPI):
 
         folder_history = models.DBFolderHistory(
             size=0.0,
-            date=datetime.utcnow(),
+            date=_now(),
             user_id=body.owner_id,
             folder_id=new_folder.id,
             path=new_path.id
