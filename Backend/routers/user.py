@@ -97,6 +97,24 @@ class UserAPI(BaseAPI):
     db: Session = Depends(get_db)
     requester_id: int = Depends(authenticator.get_current_user_id)
 
+    @router.patch("/{user_id}/public-key")
+    def set_public_key(self, user_id: int, body: dict):
+        self.require_self(self.requester_id, user_id)
+        user = self.get_or_404(self.db, models.DBUser, user_id)
+        if user.public_key is not None:
+            raise HTTPException(status_code=409, detail="Public key already set")
+        public_key = body.get("public_key", "")
+        try:
+            import base64
+            decoded = base64.b64decode(public_key, validate=True)
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid public key encoding")
+        if len(decoded) < 100:
+            raise HTTPException(status_code=400, detail="Invalid public key")
+        user.public_key = public_key
+        self.db.commit()
+        return {"message": "Public key updated"}
+
     @router.get("/by-email/{email}", response_model=UserResponse)
     def get_user_by_email(self, email: str):
         user = self.db.query(models.DBUser).filter(models.DBUser.email == email).first()
