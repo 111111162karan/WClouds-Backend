@@ -36,6 +36,17 @@ def add_folder_to_zip(zf: zipfile.ZipFile, db: Session, folder: models.DBFolder,
             # akzeptiert kein None, daher Fallback auf leeren String.
             zf.writestr(f"{prefix}{f.name}.nonce", f.nonce or "")  # ← Nonce separat
 
+            # AI Agent: nach dem Umbau auf Envelope-Encryption braucht der
+            # Client auch den gewrappten DEK, sonst kann nach einem
+            # Ordner-Download niemand mehr etwas entschluesseln. Ordner sind
+            # aktuell nicht teilbar (nur der Owner laedt seine eigenen
+            # Ordner herunter), daher reicht der Key-Eintrag des Datei-Owners.
+            key_entry = db.query(models.DBFileKey).filter(
+                models.DBFileKey.file_id == f.id,
+                models.DBFileKey.user_id == f.owner_id
+            ).first()
+            zf.writestr(f"{prefix}{f.name}.key", key_entry.wrapped_key if key_entry else "")
+
     subfolders = db.query(models.DBFolder).filter(models.DBFolder.parent_id == folder.id).all()
     for sub in subfolders:
         add_folder_to_zip(zf, db, sub, f"{prefix}{sub.name}/")

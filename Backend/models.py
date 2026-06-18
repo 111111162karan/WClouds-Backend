@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Boolean, ForeignKey, Float
+from sqlalchemy import Column, Integer, String, DateTime, Boolean, ForeignKey, Float, Text, UniqueConstraint
 from sqlalchemy.orm import relationship
 
 from database import Base
@@ -16,6 +16,10 @@ class DBUser(Base):
     # auf 0 abgeschnitten und das Limit damit nie erreicht.
     used_storage = Column(Float, default=0)     # in Gigabytes
     storage_plan = Column(Integer)              # in Gigabytes
+    # AI Agent: RSA-Public-Key des Accounts fuer Envelope-Encryption beim
+    # Sharing - Public Keys sind per Definition unkritisch, daher kein
+    # nullable=False-Zwang (alte/Test-User ohne Key bleiben moeglich).
+    public_key = Column(Text, nullable=True)
 
 
 class DBFile(Base):
@@ -52,10 +56,29 @@ class DBAccess(Base):
     __tablename__ = "access"
 
     access_id = Column(Integer, primary_key=True, index=True)
-    member_id = Column(Integer, index=True)
+    # AI Agent: member_id war ein nackter Integer ohne ForeignKey - das
+    # erlaubte verwaiste/falsche Eintraege (Share an nicht-existierende
+    # User-ID) ohne jede DB-seitige Garantie.
+    member_id = Column(Integer, ForeignKey("users.id"), index=True)
     file_id = Column(Integer, ForeignKey("files.id"))
     can_read = Column(Boolean, default=False)
     can_write = Column(Boolean, default=False)
+
+
+# AI Agent: Neue Tabelle fuer Envelope-Encryption. Pro Datei wird ein
+# zufaelliger Data-Encryption-Key (DEK) erzeugt, der Inhalt wird damit
+# AES-GCM-verschluesselt. Der DEK selbst wird hier PRO BERECHTIGTEM USER
+# (inklusive Owner!) mit dessen RSA-Public-Key gewrappt abgelegt - ohne den
+# Owner-Eintrag koennte der Owner seine eigene Datei nie wieder entschluesseln,
+# weil der rohe DEK sonst nirgends dauerhaft existiert.
+class DBFileKey(Base):
+    __tablename__ = "file_keys"
+    __table_args__ = (UniqueConstraint("file_id", "user_id", name="uq_file_key_file_user"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    file_id = Column(Integer, ForeignKey("files.id"), index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True)
+    wrapped_key = Column(Text)
 
 
 class DBFileHistory(Base):

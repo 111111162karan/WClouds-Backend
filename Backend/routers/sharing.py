@@ -16,9 +16,17 @@ from routers.base import BaseAPI
 router = APIRouter(prefix="/share", tags=["Sharing"])
 
 
+# AI Agent: jeder Empfaenger braucht einen INDIVIDUELL gewrappten DEK (mit
+# seinem eigenen Public Key) - ein gemeinsames memberIds-Array kann das
+# nicht abbilden, da der gewrappte Key pro Empfaenger unterschiedlich ist.
+class ShareGrant(BaseModel):
+    memberId: int
+    wrappedKey: str
+
+
 class ShareFileRequest(BaseModel):
     fileId: int
-    memberIds: list[int]
+    grants: list[ShareGrant]
     canRead: bool
     canWrite: bool
 
@@ -43,33 +51,58 @@ class SharingAPI(BaseAPI):
         if file.owner_id != self.requester_id:
             raise HTTPException(status_code=403, detail="Nur der Eigentümer kann eine Datei teilen")
 
+        member_ids = [g.memberId for g in request.grants]
+
+        # AI Agent: sicherheitsrelevant, nicht nur kosmetisch - ohne diesen
+        # Guard wuerde ein Self-Share den eigenen Owner-DBFileKey-Eintrag
+        # (aus dem Upload) mit einem evtl. falsch gewrappten Key
+        # ueberschreiben und den Owner aus seiner eigenen Datei aussperren.
+        if self.requester_id in member_ids:
+            raise HTTPException(status_code=400, detail="Datei kann nicht mit sich selbst geteilt werden")
+
         # Check that all member users exist
-        for member_id in request.memberIds:
+        for member_id in member_ids:
             user = self.db.query(models.DBUser).filter(models.DBUser.id == member_id).first()
             if not user:
                 raise HTTPException(status_code=404, detail=f"User {member_id} not found")
 
-        # Create or update an access entry for each member
-        for member_id in request.memberIds:
-            existing = self.db.query(models.DBAccess).filter(
-                models.DBAccess.member_id == member_id,
+        # AI Agent: Create-or-Update fuer DBAccess UND DBFileKey - ein
+        # erneutes Teilen mit einem bereits berechtigten User (z.B. um nur
+        # die Rechte zu aendern) darf nicht am Unique-Constraint von
+        # DBFileKey(file_id, user_id) scheitern.
+        for grant in request.grants:
+            existing_access = self.db.query(models.DBAccess).filter(
+                models.DBAccess.member_id == grant.memberId,
                 models.DBAccess.file_id == request.fileId
             ).first()
 
-            if existing:
-                existing.can_read = request.canRead
-                existing.can_write = request.canWrite
+            if existing_access:
+                existing_access.can_read = request.canRead
+                existing_access.can_write = request.canWrite
             else:
-                access = models.DBAccess(
-                    member_id=member_id,
+                self.db.add(models.DBAccess(
+                    member_id=grant.memberId,
                     file_id=request.fileId,
                     can_read=request.canRead,
                     can_write=request.canWrite
-                )
-                self.db.add(access)
+                ))
+
+            existing_key = self.db.query(models.DBFileKey).filter(
+                models.DBFileKey.file_id == request.fileId,
+                models.DBFileKey.user_id == grant.memberId
+            ).first()
+
+            if existing_key:
+                existing_key.wrapped_key = grant.wrappedKey
+            else:
+                self.db.add(models.DBFileKey(
+                    file_id=request.fileId,
+                    user_id=grant.memberId,
+                    wrapped_key=grant.wrappedKey
+                ))
 
         self.db.commit()
-        return {"message": "File shared successfully", "file_id": request.fileId, "members": request.memberIds}
+        return {"message": "File shared successfully", "file_id": request.fileId, "members": member_ids}
 
     @router.delete("/file/{file_id}/member/{member_id}")
     def revoke_access(self, file_id: int, member_id: int):
@@ -86,6 +119,18 @@ class SharingAPI(BaseAPI):
             raise HTTPException(status_code=404, detail="Access entry not found")
 
         self.db.delete(access)
+        # AI Agent: ohne das bliebe der gewrappte DEK fuer den Member
+        # abrufbar (GET /files/{id}/key prueft nur require_file_access,
+        # nicht ob die Zeile noch "frisch" ist) - Revoke muss den Key
+        # ebenfalls entfernen, damit GET .../key nach dem Entzug 404 statt
+        # weiterhin den alten Key liefert.
+        # Bekannte Einschraenkung: hat der Member den Key vorher schon
+        # heruntergeladen/lokal gespeichert, bleibt er im Besitz davon -
+        # Revoke wirkt nur auf zukuenftige Abrufe.
+        self.db.query(models.DBFileKey).filter(
+            models.DBFileKey.file_id == file_id,
+            models.DBFileKey.user_id == member_id
+        ).delete()
         self.db.commit()
         return {"message": "Access revoked"}
 

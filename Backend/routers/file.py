@@ -53,6 +53,11 @@ class FileAPI(BaseAPI):
         nonce: str = Form(...),
         folder_id: int = Form(None),
         original_name: str = Form(...),
+        # AI Agent: Client generiert pro Datei einen zufaelligen DEK,
+        # verschluesselt damit den Inhalt und wrapped denselben DEK direkt
+        # fuer sich selbst (Owner) mit dem eigenen Public Key. Ohne das
+        # waere der rohe DEK nach dem Upload fuer immer verloren.
+        wrapped_key_for_owner: str = Form(...),
         uploaded_file: UploadFile = File(...)
                                                 # KI | Prompt: die dateien die gespeichert werden
                                                 # sollen auch verschlüsselt werden und erklär mir dann
@@ -115,6 +120,17 @@ class FileAPI(BaseAPI):
         self.db.commit()
         self.db.refresh(db_file)
 
+        # AI Agent: Owner-Eintrag in der Key-Tabelle - der wird beim
+        # Download/Overwrite gebraucht, um den DEK ueberhaupt wieder
+        # entpacken zu koennen.
+        owner_key = models.DBFileKey(
+            file_id=db_file.id,
+            user_id=owner_id,
+            wrapped_key=wrapped_key_for_owner
+        )
+        self.db.add(owner_key)
+        self.db.commit()
+
         # AI Agent: Response-Format an das vom Frontend erwartete
         # SavedFile-Objekt {ID, FileName, Extension} angepasst - vorher kam
         # {"message": "uploaded", "file_id": ...} zurueck, das beim
@@ -145,6 +161,27 @@ class FileAPI(BaseAPI):
             headers={"X-Nonce": db_file.nonce or ""}
         )
 
+    # AI Agent: liefert dem Requester seinen eigenen gewrappten DEK fuer
+    # diese Datei. Lesezugriff reicht, weil auch read-only-Grantees zum
+    # Entschluesseln einen Key brauchen - require_file_access(write=False)
+    # laesst sowohl reine Leser als auch Schreiber durch.
+    @router.get("/{file_id}/key")
+    def get_file_key(self, file_id: int):
+        self.require_file_access(self.db, file_id, self.requester_id, write=False)
+
+        key_entry = self.db.query(models.DBFileKey).filter(
+            models.DBFileKey.file_id == file_id,
+            models.DBFileKey.user_id == self.requester_id
+        ).first()
+        if not key_entry:
+            # Zugriff besteht laut DBAccess/Owner-Check, aber kein Key
+            # vorhanden - das ist ein Dateninkonsistenz-Fall (z.B. Share
+            # ist beim Schreiben des Keys fehlgeschlagen), kein normaler
+            # 403-Fall.
+            raise HTTPException(status_code=404, detail="Kein Schluessel fuer diese Datei gefunden")
+
+        return {"wrapped_key": key_entry.wrapped_key}
+
     @router.get("/{user_id}", response_model=list[FileResponse])
     def get_user_files(self, user_id: int):
         self.require_self(self.requester_id, user_id)
@@ -152,6 +189,62 @@ class FileAPI(BaseAPI):
             .filter(models.DBFile.owner_id == user_id)\
             .all()
         return files
+
+    # AI Agent: Es gab bisher KEINEN Endpoint, um den Inhalt einer
+    # existierenden Datei zu ersetzen (nur Create/Read/Delete) - "can_write"
+    # wurde nur fuer DELETE geprueft. Wichtig: der DEK bleibt UNVERAENDERT
+    # (kein Re-Wrap fuer alle Berechtigten noetig), nur ein frischer Nonce
+    # pro Verschluesselung - das ist mit AES-GCM korrekt und sicher.
+    @router.put("/{file_id}")
+    def overwrite_file(
+        self,
+        file_id: int,
+        nonce: str = Form(...),
+        uploaded_file: UploadFile = File(...)
+    ):
+        db_file = self.require_file_access(self.db, file_id, self.requester_id, write=True)
+        owner = self.db.query(models.DBUser).filter(models.DBUser.id == db_file.owner_id).first()
+        old_db_path = self.db.query(models.DBPath).filter(models.DBPath.id == db_file.path_id).first()
+
+        encrypted_data = uploaded_file.file.read()
+        new_size_gb = len(encrypted_data) / GB
+        old_size_gb = 0.0
+        if old_db_path and os.path.exists(old_db_path.path):
+            old_size_gb = os.path.getsize(old_db_path.path) / GB
+
+        # AI Agent: Quota-Check zulasten des OWNERS (nicht des Requesters) -
+        # sonst koennte ein Nicht-Owner mit can_write das Speicherlimit des
+        # Owners durch Ueberschreiben mit einer riesigen Datei sprengen.
+        projected_usage = owner.used_storage - old_size_gb + new_size_gb
+        if projected_usage > owner.storage_plan:
+            raise HTTPException(status_code=413, detail="Speicherlimit erreicht")
+
+        user_upload_dir = os.path.join(UPLOAD_DIR, str(db_file.owner_id))
+        os.makedirs(user_upload_dir, exist_ok=True)
+        new_save_path = os.path.join(user_upload_dir, f"{uuid.uuid4().hex}.enc")
+        with open(new_save_path, "wb") as f:
+            f.write(encrypted_data)
+
+        # AI Agent: erst die neue Datei schreiben + DB committen, ERST DANACH
+        # die alte physische Datei loeschen - bei einem Schreibfehler bleibt
+        # so die alte Version intakt statt Datenverlust zu riskieren.
+        old_path_to_remove = old_db_path.path if old_db_path else None
+        if old_db_path:
+            old_db_path.path = new_save_path
+        else:
+            old_db_path = models.DBPath(path=new_save_path)
+            self.db.add(old_db_path)
+            self.db.flush()
+            db_file.path_id = old_db_path.id
+
+        db_file.nonce = nonce
+        owner.used_storage = max(0.0, projected_usage)
+        self.db.commit()
+
+        if old_path_to_remove and os.path.exists(old_path_to_remove):
+            os.remove(old_path_to_remove)
+
+        return {"message": "overwritten", "file_id": db_file.id}
 
     @router.get("/info/{file_id}")
     def get_file_info(self, file_id: int):
@@ -188,6 +281,13 @@ class FileAPI(BaseAPI):
 
         if db_path and os.path.exists(db_path.path):
             os.remove(db_path.path)
+
+        # AI Agent: DBAccess- und DBFileKey-Zeilen fuer diese Datei wurden
+        # beim Loeschen bisher nie aufgeraeumt - verwaiste Eintraege blieben
+        # zurueck (insb. bei DBFileKey jetzt auch sicherheitsrelevant, falls
+        # eine neue Datei je dieselbe file_id wiederverwenden wuerde).
+        self.db.query(models.DBAccess).filter(models.DBAccess.file_id == file_id).delete()
+        self.db.query(models.DBFileKey).filter(models.DBFileKey.file_id == file_id).delete()
 
         self.db.delete(db_file)
         if db_path:

@@ -50,12 +50,20 @@ class UserCreate(BaseModel):
     email: str
     password: str
     storage_plan_key: str
+    # AI Agent: RSA-Public-Key (Base64 von ExportSubjectPublicKeyInfo) fuer
+    # echtes E2E-Sharing - wird einmalig bei der Registrierung gesetzt,
+    # niemals beim Login ueberschrieben (sonst wuerden alle bestehenden,
+    # fuer den alten Key gewrappten DEKs unbrauchbar).
+    public_key: str
 
 
 class UserResponse(BaseModel):
     id: int
     email: str
     storage_plan: int
+    # AI Agent: bewusst oeffentlich abrufbar - Public Keys sind per
+    # Definition unkritisch, jeder eingeloggte User braucht sie zum Sharen.
+    public_key: str | None = None
 
 
 class UserLogin(BaseModel):
@@ -178,12 +186,22 @@ class UserLoginAPI(BaseAPI):
         if is_valid_email(user.email) == False:
             raise HTTPException(status_code=400, detail="Invalid email syntax")
 
+        # AI Agent: Minimal-Validierung des Public Keys - ohne das scheitert
+        # Sharing erst viel spaeter mit einem kryptischen RSA-Parsing-Fehler
+        # beim Empfaenger statt mit einer klaren 400 hier beim Registrieren.
+        try:
+            decoded_public_key = base64.b64decode(user.public_key, validate=True)
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid public key encoding")
+        if len(decoded_public_key) < 100:
+            raise HTTPException(status_code=400, detail="Invalid public key")
 
         new_user = models.DBUser(
             email=user.email,
             password=password_hash.hash(user.password),
             last_login=datetime.datetime.now(),
             storage_plan=int(stored_plan.storage),
+            public_key=user.public_key,
         )
         self.db.add(new_user)
         self.db.commit()
