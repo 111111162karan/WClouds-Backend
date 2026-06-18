@@ -20,6 +20,8 @@ class DBUser(Base):
     # Sharing - Public Keys sind per Definition unkritisch, daher kein
     # nullable=False-Zwang (alte/Test-User ohne Key bleiben moeglich).
     public_key = Column(Text, nullable=True)
+    # Zeitpunkt der gesendeten Lösch-Warnung; None = noch keine Warnung
+    deletion_warning_sent = Column(DateTime, nullable=True)
 
 
 class DBFile(Base):

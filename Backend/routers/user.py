@@ -135,6 +135,7 @@ class UserAPI(BaseAPI):
             raise HTTPException(status_code=404, detail="User not found")
         self.require_self(self.requester_id, db_user.id)
         db_user.last_login = datetime.datetime.now()
+        db_user.deletion_warning_sent = None  # Warnung zurücksetzen wenn User wieder aktiv
         self.db.commit()
         self.db.refresh(db_user)
         return {"message": "Last login updated"}
@@ -233,6 +234,7 @@ class UserLoginAPI(BaseAPI):
         if db_user and password_hash.verify(user.password, db_user.password):
             session_key = authenticator.create_api_key(db_user.id)
             db_user.last_login = datetime.datetime.now()
+            db_user.deletion_warning_sent = None  # Warnung zurücksetzen wenn User wieder aktiv
             self.db.commit()
             self.db.refresh(db_user)
             return {"session_key": session_key, "user_id": db_user.id}
