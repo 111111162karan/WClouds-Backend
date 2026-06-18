@@ -51,6 +51,31 @@ def add_folder_to_zip(zf: zipfile.ZipFile, db: Session, folder: models.DBFolder,
     for sub in subfolders:
         add_folder_to_zip(zf, db, sub, f"{prefix}{sub.name}/")
 
+def delete_folder_recursive(db: Session, folder: models.DBFolder):
+    files = db.query(models.DBFile).filter(models.DBFile.folder_id == folder.id).all()
+    for f in files:
+        db_path = db.query(models.DBPath).filter(models.DBPath.id == f.path_id).first()
+        owner = db.query(models.DBUser).filter(models.DBUser.id == f.owner_id).first()
+        if db_path and _os.path.exists(db_path.path):
+            if owner:
+                from routers.file import GB
+                owner.used_storage = max(0.0, owner.used_storage - _os.path.getsize(db_path.path) / GB)
+            _os.remove(db_path.path)
+        db.query(models.DBAccess).filter(models.DBAccess.file_id == f.id).delete()
+        db.query(models.DBFileKey).filter(models.DBFileKey.file_id == f.id).delete()
+        db.delete(f)
+        if db_path:
+            db.delete(db_path)
+
+    for sub in db.query(models.DBFolder).filter(models.DBFolder.parent_id == folder.id).all():
+        delete_folder_recursive(db, sub)
+
+    folder_path = db.query(models.DBPath).filter(models.DBPath.id == folder.path_id).first()
+    db.delete(folder)
+    if folder_path:
+        db.delete(folder_path)
+
+
 def get_folder_size(db: Session, folder: models.DBFolder) -> float:
     total = 0.0
     files = db.query(models.DBFile).filter(models.DBFile.folder_id == folder.id).all()
@@ -210,6 +235,15 @@ class DirectoryAPI(BaseAPI):
             "ChangedTime": changed_time,
             "Size": size
         }
+
+    @router.delete("/{directory_id}")
+    def delete_directory(self, directory_id: int):
+        folder = self.require_folder_owner(self.db, directory_id, self.requester_id)
+        if folder.parent_id is None:
+            raise HTTPException(status_code=400, detail="Root folder cannot be deleted")
+        delete_folder_recursive(self.db, folder)
+        self.db.commit()
+        return {"message": "deleted"}
 
     @router.get("/download/{directory_id}")
     def download_directory(self, directory_id: int):
