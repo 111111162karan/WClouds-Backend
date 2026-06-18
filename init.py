@@ -254,7 +254,7 @@ def main():
             print("====================================")
             print("  [1]  Key erstellen")
             print("  [2]  Nutzer direkt anlegen")
-            print("  [3]  Test-User mit Dummy-Daten")
+            # print("  [3]  Test-User mit Dummy-Daten")
             print("  [0]  Beenden")
             print("------------------------------------")
             choice = input("Auswahl: ").strip()
@@ -262,8 +262,8 @@ def main():
                 create_key(db)
             elif choice == "2":
                 create_user(db)
-            elif choice == "3":
-                create_test_users(db)
+            # elif choice == "3":
+            #    create_test_users(db)
             elif choice == "0":
                 break
             else:
