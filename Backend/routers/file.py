@@ -137,7 +137,8 @@ class FileAPI(BaseAPI):
             date=datetime.utcnow(),
             user_id=owner_id,
             file_id=db_file.id,
-            path=db_path.id
+            path=db_path.id,
+            nonce=nonce
         )
         self.db.add(history)
         if folder_id is not None:
@@ -226,61 +227,61 @@ class FileAPI(BaseAPI):
         owner = self.db.query(models.DBUser).filter(models.DBUser.id == db_file.owner_id).first()
         old_db_path = self.db.query(models.DBPath).filter(models.DBPath.id == db_file.path_id).first()
 
+        old_file_path = old_db_path.path if old_db_path else None
+        old_nonce = db_file.nonce
+        old_size_gb = os.path.getsize(old_file_path) / GB if old_file_path and os.path.exists(old_file_path) else 0.0
+
         encrypted_data = uploaded_file.file.read()
         new_size_gb = len(encrypted_data) / GB
-        old_size_gb = 0.0
-        if old_db_path and os.path.exists(old_db_path.path):
-            old_size_gb = os.path.getsize(old_db_path.path) / GB
 
-        # AI Agent: Quota-Check zulasten des OWNERS (nicht des Requesters) -
-        # sonst koennte ein Nicht-Owner mit can_write das Speicherlimit des
-        # Owners durch Ueberschreiben mit einer riesigen Datei sprengen.
+        # AI Agent: Quota-Check zulasten des OWNERS (nicht des Requesters)
         projected_usage = owner.used_storage - old_size_gb + new_size_gb
         if projected_usage > owner.storage_plan:
             raise HTTPException(status_code=413, detail="Speicherlimit erreicht")
 
+        # Altes File in Backup-Verzeichnis verschieben (nicht löschen)
+        backup_dir = os.path.join(UPLOAD_DIR, "backup", str(db_file.owner_id))
+        os.makedirs(backup_dir, exist_ok=True)
+        backup_path = os.path.join(backup_dir, f"{uuid.uuid4().hex}.enc")
+        if old_file_path and os.path.exists(old_file_path):
+            os.rename(old_file_path, backup_path)
+            if old_db_path:
+                old_db_path.path = backup_path  # altes DBPath zeigt jetzt auf Backup
+
+        # Neues File schreiben + neues DBPath anlegen
         user_upload_dir = os.path.join(UPLOAD_DIR, str(db_file.owner_id))
         os.makedirs(user_upload_dir, exist_ok=True)
         new_save_path = os.path.join(user_upload_dir, f"{uuid.uuid4().hex}.enc")
         with open(new_save_path, "wb") as f:
             f.write(encrypted_data)
 
-        # AI Agent: erst die neue Datei schreiben + DB committen, ERST DANACH
-        # die alte physische Datei loeschen - bei einem Schreibfehler bleibt
-        # so die alte Version intakt statt Datenverlust zu riskieren.
-        old_path_to_remove = old_db_path.path if old_db_path else None
-        if old_db_path:
-            old_db_path.path = new_save_path
-        else:
-            old_db_path = models.DBPath(path=new_save_path)
-            self.db.add(old_db_path)
-            self.db.flush()
-            db_file.path_id = old_db_path.id
+        new_db_path = models.DBPath(path=new_save_path)
+        self.db.add(new_db_path)
+        self.db.flush()
 
+        db_file.path_id = new_db_path.id
         db_file.nonce = nonce
         owner.used_storage = max(0.0, projected_usage)
         self.db.commit()
 
-        if old_path_to_remove and os.path.exists(old_path_to_remove):
-            os.remove(old_path_to_remove)
-
+        # History-Eintrag für neue Version
         history = models.DBFileHistory(
             size=new_size_gb,
             date=datetime.utcnow(),
             user_id=self.requester_id,
             file_id=file_id,
-            path=old_db_path.id
+            path=new_db_path.id,
+            nonce=nonce
         )
         self.db.add(history)
         if db_file.folder_id is not None:
-            folder_history = models.DBFolderHistory(
+            self.db.add(models.DBFolderHistory(
                 size=new_size_gb,
                 date=datetime.utcnow(),
                 user_id=self.requester_id,
                 folder_id=db_file.folder_id,
-                path=old_db_path.id
-            )
-            self.db.add(folder_history)
+                path=new_db_path.id
+            ))
         self.db.commit()
 
         return {"message": "overwritten", "file_id": db_file.id}
@@ -319,6 +320,56 @@ class FileAPI(BaseAPI):
             "ChangedTime": changed_time,
             "Size": size_mb
         }
+
+    @router.get("/history/{history_id}/download")
+    def download_history_backup(self, history_id: int):
+        h = self.db.query(models.DBFileHistory).filter(
+            models.DBFileHistory.backup_file_id == history_id
+        ).first()
+        if not h:
+            raise HTTPException(status_code=404, detail="History-Eintrag nicht gefunden")
+
+        self.require_file_access(self.db, h.file_id, self.requester_id, write=False)
+
+        if not h.path or not h.nonce:
+            raise HTTPException(status_code=404, detail="Kein Backup für diesen Eintrag vorhanden")
+
+        db_path = self.db.query(models.DBPath).filter(models.DBPath.id == h.path).first()
+        if not db_path or not os.path.exists(db_path.path):
+            raise HTTPException(status_code=404, detail="Backup-Datei nicht auf Disk gefunden")
+
+        return FastAPIFileResponse(
+            path=db_path.path,
+            media_type="application/octet-stream",
+            filename="backup.enc",
+            headers={"X-Nonce": h.nonce}
+        )
+
+    @router.get("/{file_id}/history")
+    def get_file_history(self, file_id: int):
+        self.require_file_access(self.db, file_id, self.requester_id, write=False)
+
+        entries = (
+            self.db.query(models.DBFileHistory)
+            .filter(models.DBFileHistory.file_id == file_id)
+            .order_by(models.DBFileHistory.date.desc())
+            .all()
+        )
+
+        result = []
+        for h in entries:
+            user = self.db.query(models.DBUser).filter(models.DBUser.id == h.user_id).first()
+            db_path = self.db.query(models.DBPath).filter(models.DBPath.id == h.path).first() if h.path else None
+            has_backup = bool(h.nonce and db_path and os.path.exists(db_path.path))
+            result.append({
+                "HistoryId": h.backup_file_id,
+                "Date": h.date.date().isoformat() if h.date else None,
+                "Time": h.date.strftime("%H:%M") if h.date else None,
+                "SizeMb": round(h.size * 1024, 3) if h.size else 0.0,
+                "ChangedUser": user.email if user else str(h.user_id),
+                "HasBackup": has_backup
+            })
+        return result
 
     # KI | Prompt: die dateien die gespeichert werden
     # sollen auch verschlüsselt werden und erklär mir dann

@@ -12,13 +12,17 @@ from scheduler import start_scheduler, stop_scheduler
 # Tabellen anlegen (falls noch nicht vorhanden)
 models.Base.metadata.create_all(bind=engine)
 
-# Inline-Migration: deletion_warning_sent-Spalte zu bestehenden DBs hinzufügen
+# Inline-Migrationen für bestehende DBs
 with engine.connect() as _conn:
-    try:
-        _conn.execute(text("ALTER TABLE users ADD COLUMN deletion_warning_sent DATETIME"))
-        _conn.commit()
-    except Exception:
-        pass  # Spalte existiert bereits
+    for _stmt in [
+        "ALTER TABLE users ADD COLUMN deletion_warning_sent DATETIME",
+        "ALTER TABLE file_history ADD COLUMN nonce TEXT",
+    ]:
+        try:
+            _conn.execute(text(_stmt))
+            _conn.commit()
+        except Exception:
+            pass  # Spalte existiert bereits
 
 
 @asynccontextmanager

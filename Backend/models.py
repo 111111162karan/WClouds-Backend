@@ -92,6 +92,7 @@ class DBFileHistory(Base):
     user_id = Column(Integer, ForeignKey("users.id"))
     file_id = Column(Integer, ForeignKey("files.id"))
     path = Column(ForeignKey("path.id"))
+    nonce = Column(String, nullable=True)
 
 
 class DBFolderHistory(Base):
