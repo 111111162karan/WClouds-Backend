@@ -126,10 +126,8 @@ def create_key(db):
     txt_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                             f"wclouds_key_{gb}gb.txt")
     with open(txt_path, "w", encoding="utf-8") as f:
-        f.write(f"WClouds Subscription Key\n")
-        f.write(f"Speicher : {gb} GB\n")
-        f.write(f"Key      : {b64}\n")
-        f.write(f"Erstellt : {_now().strftime('%Y-%m-%d %H:%M')}\n")
+        f.write(f"{b64}")
+
 
     print(f"  OK  Key erstellt ({gb} GB)")
     print(f"  Key: {b64}")
