@@ -184,12 +184,30 @@ class DirectoryAPI(BaseAPI):
     def get_directory_info(self, directory_id: int):
         folder = self.require_folder_owner(self.db, directory_id, self.requester_id)
         size = get_folder_size(self.db, folder)
+
+        owner = self.db.query(models.DBUser).filter(models.DBUser.id == folder.owner_id).first()
+        owner_email = owner.email if owner else str(folder.owner_id)
+
+        last_history = (
+            self.db.query(models.DBFolderHistory)
+            .filter(models.DBFolderHistory.folder_id == folder.id)
+            .order_by(models.DBFolderHistory.date.desc())
+            .first()
+        )
+        changed_date = last_history.date.date().isoformat() if last_history and last_history.date else None
+        changed_time = last_history.date.strftime("%H:%M") if last_history and last_history.date else None
+        changed_user_obj = (
+            self.db.query(models.DBUser).filter(models.DBUser.id == last_history.user_id).first()
+            if last_history else None
+        )
+        changed_user_email = changed_user_obj.email if changed_user_obj else owner_email
+
         return {
             "Name": folder.name,
-            "Owner": folder.owner_id,
-            "ChangedUser": folder.owner_id,
-            "ChangedDate": None,
-            "ChangedTime": None,
+            "Owner": owner_email,
+            "ChangedUser": changed_user_email,
+            "ChangedDate": changed_date,
+            "ChangedTime": changed_time,
             "Size": size
         }
 
