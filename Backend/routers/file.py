@@ -1,6 +1,7 @@
 from fastapi_restful.cbv import cbv
 from fastapi.responses import FileResponse as FastAPIFileResponse  # KI
 from pydantic import BaseModel
+from datetime import datetime
 import uuid
 
 import models
@@ -131,6 +132,25 @@ class FileAPI(BaseAPI):
         self.db.add(owner_key)
         self.db.commit()
 
+        history = models.DBFileHistory(
+            size=size_gb,
+            date=datetime.utcnow(),
+            user_id=owner_id,
+            file_id=db_file.id,
+            path=db_path.id
+        )
+        self.db.add(history)
+        if folder_id is not None:
+            folder_history = models.DBFolderHistory(
+                size=size_gb,
+                date=datetime.utcnow(),
+                user_id=owner_id,
+                folder_id=folder_id,
+                path=db_path.id
+            )
+            self.db.add(folder_history)
+        self.db.commit()
+
         # AI Agent: Response-Format an das vom Frontend erwartete
         # SavedFile-Objekt {ID, FileName, Extension} angepasst - vorher kam
         # {"message": "uploaded", "file_id": ...} zurueck, das beim
@@ -244,6 +264,25 @@ class FileAPI(BaseAPI):
         if old_path_to_remove and os.path.exists(old_path_to_remove):
             os.remove(old_path_to_remove)
 
+        history = models.DBFileHistory(
+            size=new_size_gb,
+            date=datetime.utcnow(),
+            user_id=self.requester_id,
+            file_id=file_id,
+            path=old_db_path.id
+        )
+        self.db.add(history)
+        if db_file.folder_id is not None:
+            folder_history = models.DBFolderHistory(
+                size=new_size_gb,
+                date=datetime.utcnow(),
+                user_id=self.requester_id,
+                folder_id=db_file.folder_id,
+                path=old_db_path.id
+            )
+            self.db.add(folder_history)
+        self.db.commit()
+
         return {"message": "overwritten", "file_id": db_file.id}
 
     @router.get("/info/{file_id}")
@@ -266,11 +305,11 @@ class FileAPI(BaseAPI):
         )
         changed_date = last_history.date.date().isoformat() if last_history and last_history.date else None
         changed_time = last_history.date.strftime("%H:%M") if last_history and last_history.date else None
-        changed_user_obj = (
+        changed_user = (
             self.db.query(models.DBUser).filter(models.DBUser.id == last_history.user_id).first()
             if last_history else None
         )
-        changed_user_email = changed_user_obj.email if changed_user_obj else owner_email
+        changed_user_email = changed_user.email if changed_user else owner_email
 
         return {
             "Name": file.name,

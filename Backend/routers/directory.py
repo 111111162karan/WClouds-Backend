@@ -10,6 +10,7 @@ import models
 from database import get_db
 from routers.auth import get_current_user_id
 from routers.base import BaseAPI, sanitize_name, safe_header_value
+from datetime import datetime
 import io
 import zipfile
 from urllib.parse import quote, unquote
@@ -201,6 +202,16 @@ class DirectoryAPI(BaseAPI):
         self.db.commit()
         self.db.refresh(new_folder)
 
+        folder_history = models.DBFolderHistory(
+            size=0.0,
+            date=datetime.utcnow(),
+            user_id=body.owner_id,
+            folder_id=new_folder.id,
+            path=new_path.id
+        )
+        self.db.add(folder_history)
+        self.db.commit()
+
         return {"ID": new_folder.id, "Name": new_folder.name, "SubDirectories": [], "Content": []}
 
 
@@ -221,11 +232,11 @@ class DirectoryAPI(BaseAPI):
         )
         changed_date = last_history.date.date().isoformat() if last_history and last_history.date else None
         changed_time = last_history.date.strftime("%H:%M") if last_history and last_history.date else None
-        changed_user_obj = (
+        changed_user = (
             self.db.query(models.DBUser).filter(models.DBUser.id == last_history.user_id).first()
             if last_history else None
         )
-        changed_user_email = changed_user_obj.email if changed_user_obj else owner_email
+        changed_user_email = changed_user.email if changed_user else owner_email
 
         return {
             "Name": folder.name,
