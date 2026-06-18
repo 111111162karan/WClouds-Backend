@@ -1,7 +1,7 @@
 from fastapi_restful.cbv import cbv
 from fastapi.responses import FileResponse as FastAPIFileResponse  # KI
 from pydantic import BaseModel
-import email.header
+import uuid
 
 import models
 import os
@@ -18,7 +18,9 @@ from routers.auth import get_current_user_id
 # sollen auch verschlüsselt werden und erklär mir dann
                                                 # wie es funktioniert
 
-from routers.base import BaseAPI
+from routers.base import BaseAPI, sanitize_name
+
+GB = 1024 ** 3
 
 router = APIRouter(prefix="/files", tags=["Files"])
 
@@ -68,19 +70,25 @@ class FileAPI(BaseAPI):
         if folder_id is not None:
             self.require_folder_owner(self.db, folder_id, self.requester_id)
 
-        # Dateiname dekodieren falls MIME-encoded
-        decoded = email.header.decode_header(uploaded_file.filename)[0]
-        if isinstance(decoded[0], bytes):
-            filename = decoded[0].decode(decoded[1] or 'utf-8')
-        else:
-            filename = decoded[0]
-        # KI | Prompt: die dateien die gespeichert werden
-        # sollen auch verschlüsselt werden und erklär mir dann
-        # wie es funktioniert
         encrypted_data = uploaded_file.file.read()
+
+        # AI Agent: Quota-Check - bisher konnte jeder User beliebig viel
+        # hochladen, unabhaengig vom gebuchten storage_plan.
+        owner = self.get_or_404(self.db, models.DBUser, owner_id)
+        size_gb = len(encrypted_data) / GB
+        if owner.used_storage + size_gb > owner.storage_plan:
+            raise HTTPException(status_code=413, detail="Speicherlimit erreicht")
+
         user_upload_dir = os.path.join(UPLOAD_DIR, str(owner_id))
         os.makedirs(user_upload_dir, exist_ok=True)
-        save_path = os.path.join(user_upload_dir, f"{filename}.enc")
+
+        # AI Agent: Speicherdateiname kam bisher direkt vom Client
+        # (original_name) - damit waren Path-Traversal ("../../etc/passwd")
+        # und gegenseitiges Ueberschreiben gleichnamiger Dateien moeglich.
+        # Eine UUID ist vom Original-Dateinamen unabhaengig; der Anzeigename
+        # wird weiterhin sanitisiert in db_file.name gespeichert.
+        disk_filename = f"{uuid.uuid4().hex}.enc"
+        save_path = os.path.join(user_upload_dir, disk_filename)
         with open(save_path, "wb") as f:
             f.write(encrypted_data)
 
@@ -89,20 +97,33 @@ class FileAPI(BaseAPI):
         self.db.commit()
         self.db.refresh(db_path)
 
+        display_name = sanitize_name(original_name)
         db_file = models.DBFile(
-            name=original_name,
+            name=display_name,
             owner_id=owner_id,
             path_id=db_path.id,
             folder_id=folder_id,
             nonce=nonce                      # KI
         )
         self.db.add(db_file)
+
+        # AI Agent: used_storage wurde beim Upload nie automatisch erhoeht,
+        # nur ueber den separaten (und bisher mit dem Frontend nicht
+        # uebereinstimmenden) /updateusedstorage-Endpoint.
+        owner.used_storage += size_gb
+
         self.db.commit()
         self.db.refresh(db_file)
 
-        return {"message": "uploaded", "file_id": db_file.id}  # KI | Prompt: die dateien die gespeichert werden
-                                                # sollen auch verschlüsselt werden und erklär mir dann
-                                                # wie es funktioniert
+        # AI Agent: Response-Format an das vom Frontend erwartete
+        # SavedFile-Objekt {ID, FileName, Extension} angepasst - vorher kam
+        # {"message": "uploaded", "file_id": ...} zurueck, das beim
+        # Deserialisieren in SavedFile nur leere/0-Werte ergeben haette.
+        return {
+            "ID": db_file.id,
+            "FileName": os.path.splitext(display_name)[0],
+            "Extension": os.path.splitext(display_name)[1]
+        }
 
     # KI | Prompt: die dateien die gespeichert werden
     # sollen auch verschlüsselt werden und erklär mir dann
@@ -115,11 +136,13 @@ class FileAPI(BaseAPI):
         if not db_path or not os.path.exists(db_path.path):
             raise HTTPException(status_code=404, detail="File not found on disk")
 
+        # AI Agent: nonce ist im Model nullable, HTTP-Header dürfen aber
+        # keinen None-Wert haben - sonst wirft Starlette hier einen Fehler.
         return FastAPIFileResponse(
             path=db_path.path,
             media_type="application/octet-stream",
             filename=db_file.name + ".enc",
-            headers={"X-Nonce": db_file.nonce}
+            headers={"X-Nonce": db_file.nonce or ""}
         )
 
     @router.get("/{user_id}", response_model=list[FileResponse])
@@ -155,6 +178,13 @@ class FileAPI(BaseAPI):
         db_file = self.require_file_access(self.db, file_id, self.requester_id, write=True)
 
         db_path = self.db.query(models.DBPath).filter(models.DBPath.id == db_file.path_id).first()
+
+        # AI Agent: Gegenstueck zum Quota-Tracking beim Upload - sonst
+        # bliebe used_storage nach dem Loeschen einer Datei dauerhaft zu hoch.
+        owner = self.db.query(models.DBUser).filter(models.DBUser.id == db_file.owner_id).first()
+        if db_path and os.path.exists(db_path.path) and owner:
+            size_gb = os.path.getsize(db_path.path) / GB
+            owner.used_storage = max(0.0, owner.used_storage - size_gb)
 
         if db_path and os.path.exists(db_path.path):
             os.remove(db_path.path)

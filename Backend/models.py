@@ -11,7 +11,10 @@ class DBUser(Base):
     email = Column(String)
     password = Column(String)
     last_login = Column(DateTime)
-    used_storage = Column(Integer, default=0)   # in Gigabytes
+    # AI Agent: war Integer - Dateigroessen in GB sind fast immer
+    # Bruchzahlen (z.B. 0.003 GB), mit Integer wurde jede Quota-Buchung
+    # auf 0 abgeschnitten und das Limit damit nie erreicht.
+    used_storage = Column(Float, default=0)     # in Gigabytes
     storage_plan = Column(Integer)              # in Gigabytes
 
 

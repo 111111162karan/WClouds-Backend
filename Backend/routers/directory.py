@@ -9,7 +9,7 @@ import os as _os
 import models
 from database import get_db
 from routers.auth import get_current_user_id
-from routers.base import BaseAPI
+from routers.base import BaseAPI, sanitize_name, safe_header_value
 import io
 import zipfile
 from urllib.parse import quote, unquote
@@ -32,7 +32,9 @@ def add_folder_to_zip(zf: zipfile.ZipFile, db: Session, folder: models.DBFolder,
             with open(path.path, "rb") as enc_file:
                 encrypted = enc_file.read()
             zf.writestr(f"{prefix}{f.name}", encrypted)
-            zf.writestr(f"{prefix}{f.name}.nonce", f.nonce)  # ← Nonce separat
+            # AI Agent: nonce ist im Model nullable - zipfile.writestr
+            # akzeptiert kein None, daher Fallback auf leeren String.
+            zf.writestr(f"{prefix}{f.name}.nonce", f.nonce or "")  # ← Nonce separat
 
     subfolders = db.query(models.DBFolder).filter(models.DBFolder.parent_id == folder.id).all()
     for sub in subfolders:
@@ -135,12 +137,13 @@ class DirectoryAPI(BaseAPI):
     def create_directory(self, body: DirectoryCreate):
         self.require_self(self.requester_id, body.owner_id)
 
+        safe_name = sanitize_name(body.name)
         if body.parent_id:
             parent = self.require_folder_owner(self.db, body.parent_id, self.requester_id)
             parent_path = self.db.query(models.DBPath).filter(
                 models.DBPath.id == parent.path_id
             ).first()
-            new_path_str = f"{parent_path.path}{body.name}/"
+            new_path_str = f"{parent_path.path}{safe_name}/"
         else:
             new_path_str = f"/home/user{body.owner_id}/"
 
@@ -149,8 +152,11 @@ class DirectoryAPI(BaseAPI):
         self.db.commit()
         self.db.refresh(new_path)
 
+        # AI Agent: Ordnername kam bisher ungeprueft vom Client - ein Name
+        # wie "../../etc" haette beim Zip-Download (Zip-Slip) und in der
+        # gespeicherten path-Spalte Probleme machen koennen.
         new_folder = models.DBFolder(
-            name=body.name,
+            name=safe_name,
             owner_id=body.owner_id,
             path_id=new_path.id,
             parent_id=body.parent_id
@@ -186,9 +192,14 @@ class DirectoryAPI(BaseAPI):
 
         zip_buffer.seek(0)
         from fastapi.responses import StreamingResponse
+        # AI Agent: folder.name landete bisher 1:1 in den Headern - ein
+        # Name mit Zeichen ausserhalb von Latin-1 (z.B. Emoji, kyrillisch,
+        # japanisch) liess StreamingResponse mit einem UnicodeEncodeError
+        # abstuerzen.
+        safe_name = safe_header_value(folder.name)
         return StreamingResponse(
             zip_buffer,
             media_type="application/zip",
-            headers={"Content-Disposition": f"attachment; filename={folder.name}.zip",
-                     "X-Folder-Name": folder.name}
+            headers={"Content-Disposition": f"attachment; filename={safe_name}.zip",
+                     "X-Folder-Name": safe_name}
         )

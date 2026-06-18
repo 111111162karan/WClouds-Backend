@@ -1,14 +1,37 @@
+import os
+
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 import models
+
+
+# AI Agent: Datei-/Ordnernamen kommen vom Client und wurden bisher
+# ungeprueft als Pfad- bzw. Zip-Eintrag-Bestandteil verwendet. Ein Name
+# wie "../../etc/passwd" oder "../bar" haette beim Upload Dateien
+# ausserhalb des uploads-Ordners schreiben bzw. beim Zip-Download Dateien
+# ausserhalb des Zielordners platzieren koennen (Path-Traversal/Zip-Slip).
+def sanitize_name(name: str, fallback: str = "unnamed") -> str:
+    name = os.path.basename(name.replace("\\", "/").strip())
+    name = name.replace("..", "_")
+    return name or fallback
+
+
+# AI Agent: HTTP-Header duerfen nur Latin-1 enthalten - ein Datei- oder
+# Ordnername mit z.B. Emoji oder asiatischen Zeichen liess
+# StreamingResponse bisher mit einem UnicodeEncodeError abstuerzen.
+def safe_header_value(value: str, fallback: str = "?") -> str:
+    return value.encode("latin-1", errors="replace").decode("latin-1")
+
 
 class BaseAPI:
 
     def get_or_404(self, db: Session, model, item_id: int):
         item = db.query(model).filter(model.id == item_id).first()
         if not item:
-            raise HTTPException(status_code=404, detail=f"Eintrag in"
-                                                        f"'{model.__tablename__}' mit ID '{item_id}'"
+            # AI Agent: fehlende Leerzeichen in der Fehlermeldung gefixt
+            # ("in'files' mit ID '5'nicht gefunden" -> lesbarer Text)
+            raise HTTPException(status_code=404, detail=f"Eintrag in "
+                                                        f"'{model.__tablename__}' mit ID '{item_id}' "
                                                         f"nicht gefunden")
         return item
 

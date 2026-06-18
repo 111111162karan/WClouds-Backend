@@ -1,5 +1,3 @@
-from urllib import response
-
 from fastapi import Security, HTTPException
 from fastapi.security import APIKeyHeader
 import secrets
@@ -16,7 +14,9 @@ def create_api_key(user_id):
     return new_key
 
 def delete_api_key(user_id):
-    api_keys.pop(user_id)
+    # AI Agent: .pop(user_id) ohne Default warf KeyError bei doppeltem
+    # Logout-Aufruf - jetzt wird das einfach ignoriert.
+    api_keys.pop(user_id, None)
 
 def get_api_key(user_id: int) -> str:
     return api_keys.get(user_id)

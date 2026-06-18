@@ -3,10 +3,12 @@ import base64
 from fastapi import HTTPException
 import routers.auth as authenticator
 from fastapi_restful.cbv import cbv
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 import datetime
 import models
 from pwdlib import PasswordHash
+
+GB = 1024 ** 3
 
 from sqlalchemy.orm import Session
 from fastapi.params import Depends
@@ -28,7 +30,10 @@ def is_valid_email(email):
 
     # Regular expression for validating an Email
 
-    regex = r'^[a-z0-9]+[\._]?[a-z0-9]+[@]\w+[.]\w+$'
+    # AI Agent: alte Regex erlaubte nur einen Trennzeichen im lokalen Teil
+    # und keine Großbuchstaben, dadurch wurden gültige Adressen wie
+    # "John.Doe@gmail.com" oder "a.b.c@gmail.com" fälschlich abgelehnt.
+    regex = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
 
     # If the string matches the regex, it is a valid email
 
@@ -58,9 +63,22 @@ class UserLogin(BaseModel):
     password: str
 
 
+# AI Agent: das Frontend schickt PATCH /user/updateusedstorage (ohne
+# user_id im Pfad) mit Body {"UserID": int, "usedBytes": long} - die alten
+# Feldnamen/Pfad passten nicht zu dem, was die WPF-App tatsaechlich sendet.
 class UserUpdateUsedStorage(BaseModel):
-    user_id: int
-    used_storage: int
+    model_config = ConfigDict(populate_by_name=True)
+
+    user_id: int = Field(alias="UserID")
+    used_bytes: int = Field(alias="usedBytes")
+
+
+# AI Agent: Frontend schickt PATCH /user/updatelogin (ohne user_id im Pfad)
+# mit Body {"email": str, "lastLogin": datetime} statt wie bisher
+# erwartet /user/updatelogin/{user_id} ohne Body.
+class UserUpdateLogin(BaseModel):
+    email: str
+    lastLogin: datetime.datetime | None = None
 
 
 password_hash = PasswordHash.recommended()
@@ -83,30 +101,51 @@ class UserAPI(BaseAPI):
         self.require_self(self.requester_id, user_id)
         return self.get_or_404(self.db, models.DBUser, user_id)
 
-    @router.patch("/updateusedstorage/{user_id}")
-    def update_used_storage(self, user_id: int, body: UserUpdateUsedStorage):
-        self.require_self(self.requester_id, user_id)
-        db_user = self.get_or_404(self.db, models.DBUser, user_id)
-        db_user.used_storage = body.used_storage
+    # AI Agent: Pfad und Body an das tatsaechliche Frontend-Verhalten
+    # angepasst (vorher /updateusedstorage/{user_id} ohne Body-Match) und
+    # raise HTTPException(200, ...) durch ein echtes return ersetzt -
+    # eine raised HTTPException fuer einen Erfolgsfall ist ein Anti-Pattern
+    # und liefert nur {"detail": "..."} statt eines brauchbaren Bodys.
+    @router.patch("/updateusedstorage")
+    def update_used_storage(self, body: UserUpdateUsedStorage):
+        self.require_self(self.requester_id, body.user_id)
+        db_user = self.get_or_404(self.db, models.DBUser, body.user_id)
+        db_user.used_storage = body.used_bytes / GB
         self.db.commit()
         self.db.refresh(db_user)
-        raise HTTPException(status_code=200, detail="Used storage updated")
+        return {"message": "Used storage updated", "used_storage": db_user.used_storage}
 
-    @router.patch("/updatelogin/{user_id}")
-    def update_last_login(self, user_id: int):
-        self.require_self(self.requester_id, user_id)
-        db_user = self.get_or_404(self.db, models.DBUser, user_id)
+    # AI Agent: Pfad und Body an das tatsaechliche Frontend-Verhalten
+    # angepasst (vorher /updatelogin/{user_id} ohne Body). Der vom Client
+    # gesendete lastLogin-Zeitstempel wird bewusst ignoriert - die
+    # Server-Zeit ist die verlaessliche Quelle, ein Client koennte sonst
+    # einen beliebigen Zeitstempel faelschen.
+    @router.patch("/updatelogin")
+    def update_last_login(self, body: UserUpdateLogin):
+        db_user = self.db.query(models.DBUser).filter(models.DBUser.email == body.email).first()
+        if not db_user:
+            raise HTTPException(status_code=404, detail="User not found")
+        self.require_self(self.requester_id, db_user.id)
         db_user.last_login = datetime.datetime.now()
         self.db.commit()
         self.db.refresh(db_user)
-        raise HTTPException(status_code=200, detail="Last login updated")
+        return {"message": "Last login updated"}
+
+    # AI Agent: es gab eine delete_api_key()-Funktion im auth-Modul, die
+    # aber nirgends aufgerufen wurde - kein Logout-Endpoint existierte.
+    @router.post("/logout")
+    def logout(self):
+        authenticator.delete_api_key(self.requester_id)
+        return {"message": "Logged out"}
 
 
 @cbv(router)
 class UserLoginAPI(BaseAPI):
     db: Session = Depends(get_db)
 
-    @router.post("/register")
+    # AI Agent: status_code jetzt am Decorator statt per raise
+    # HTTPException(201, ...) im Erfolgsfall (Anti-Pattern, siehe unten).
+    @router.post("/register", status_code=201)
     def create_user(self, user: UserCreate):
 
         try:
@@ -133,7 +172,7 @@ class UserLoginAPI(BaseAPI):
         if existing_user:
             raise HTTPException(status_code=409, detail="Email already registered")
 
-        # The client sends a SHA-256 hex digest; hash it once more with bcrypt
+        # The client sends an SHA-256 hex digest; hash it once more with bcrypt
         # so the DB never stores a raw or single-hashed value.
         # Email check:
         if is_valid_email(user.email) == False:
@@ -167,7 +206,7 @@ class UserLoginAPI(BaseAPI):
         self.db.add(root_folder)
         self.db.commit()
 
-        raise HTTPException(status_code=201, detail="User created")
+        return {"id": new_user.id, "email": new_user.email, "storage_plan": new_user.storage_plan}
 
     @router.post("/login")
     def login_user(self, user: UserLogin):
