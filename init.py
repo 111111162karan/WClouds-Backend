@@ -40,7 +40,7 @@ def _make_key(gb: int, redeemed: bool, db) -> str:
     raw = secrets.token_urlsafe(32)
     db.add(models.DBStoragePlanKeys(key=raw, storage=gb, redeemed=redeemed))
     db.commit()
-    return base64.b64encode(raw.encode()).decode()
+    return raw
 
 def _create_user_with_root(email: str, password: str, gb: int, db) -> models.DBUser:
     hashed = _hash_password(password)
