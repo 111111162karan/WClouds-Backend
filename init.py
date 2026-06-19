@@ -7,7 +7,7 @@ import shutil
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
-_backend_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Backend")
+_backend_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "src")
 os.chdir(_backend_dir)
 sys.path.insert(0, _backend_dir)
 

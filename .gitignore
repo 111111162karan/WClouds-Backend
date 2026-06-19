@@ -615,4 +615,4 @@ fabric.properties
 # .idea
 
 WClouds.db
-/Backend/uploads/
+/src/uploads/
